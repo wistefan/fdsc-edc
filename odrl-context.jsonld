@@ -1,11 +1,10 @@
 {
   "@context": {
-    "odrl": "http://www.w3.org/ns/odrl/2/",
-    "permissions":  { "@id": "odrl:permission",  "@container": "@set" },
-    "prohibitions": { "@id": "odrl:prohibition", "@container": "@set" },
-    "obligations":  { "@id": "odrl:duty",        "@container": "@set" },
-    "profiles":     { "@id": "odrl:profile",     "@container": "@set" },
-    "duties":       { "@id": "odrl:duty",        "@container": "@set" },
-    "constraints":  { "@id": "odrl:constraint",  "@container": "@set" }
+    "permissions":  { "@id": "permissions",  "@container": "@set" },
+    "prohibitions": { "@id": "prohibitions", "@container": "@set" },
+    "obligations":  { "@id": "obligations",  "@container": "@set" },
+    "profiles":     { "@id": "profiles",     "@container": "@set" },
+    "duties":       { "@id": "duties",       "@container": "@set" },
+    "constraints":  { "@id": "constraints",  "@container": "@set" }
   }
 }
