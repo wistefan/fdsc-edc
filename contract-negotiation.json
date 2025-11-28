@@ -5,11 +5,23 @@
   "description": "Adds a property containing the status of a corresponding EDC Contract Negotiation.",
   "type": "object",
   "properties": {
-    "isPending": {
-      "type": "boolean"
-    },
-    "isLeased": {
-      "type": "boolean"
+    "contractNegotiation": {
+      "type" : "object",
+      "properties": {
+        "isPending": {
+          "type": "boolean"
+        },
+        "isLeased": {
+          "type": "boolean"
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "initial", "requesting", "requested", "offering", "offered", "accepting", "terminated",
+            "accepted", "agreeing", "agreed", "verifying", "verified", "finalizing", "terminating"
+          ]
+        }
+      }
     }
   }
 }
