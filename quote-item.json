@@ -1,11 +1,14 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "external-id.json",
-  "title": "External ID",
-  "description": "Externally assigned Id of an object.",
+  "$id": "quote-item.json",
+  "title": "Quote Item Extension",
+  "description": "Extensions of a quote.",
   "type": "object",
   "properties": {
     "externalId": {
+      "type": "string"
+    },
+    "datasetId": {
       "type": "string"
     },
     "policy": {
