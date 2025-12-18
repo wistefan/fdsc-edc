@@ -17,6 +17,9 @@
         "correlationId": {
           "type": "string"
         },
+        "counterPartyAddress": {
+          "type": "string"
+        },
         "state": {
           "type": "string",
           "enum": [
