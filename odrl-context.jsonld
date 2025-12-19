@@ -5,6 +5,7 @@
     "obligations":  { "@id": "obligations",  "@container": "@set" },
     "profiles":     { "@id": "profiles",     "@container": "@set" },
     "duties":       { "@id": "duties",       "@container": "@set" },
-    "constraints":  { "@id": "constraints",  "@container": "@set" }
+    "constraints":  { "@id": "constraints",  "@container": "@set" },
+    "credentials": {"@id": "credentials", "@container": "@set"}
   }
 }
