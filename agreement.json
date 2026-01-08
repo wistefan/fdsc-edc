@@ -8,7 +8,7 @@
     "externalId": {
       "type": "string"
     },
-    "contractId": {
+    "negotiationId": {
       "type": "string"
     }
   },
