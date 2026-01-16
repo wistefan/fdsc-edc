@@ -229,17 +229,6 @@
             <version>${edc.version}</version>
         </dependency>
 
-        <!--        <dependency>-->
-        <!--            <groupId>org.eclipse.edc</groupId>-->
-        <!--            <artifactId>control-plane-api-client</artifactId>-->
-        <!--            <version>${edc.version}</version>-->
-        <!--            <exclusions>-->
-        <!--                <exclusion>-->
-        <!--                    <groupId>org.eclipse.jetty.websocket</groupId>-->
-        <!--                    <artifactId>jetty-websocket</artifactId>-->
-        <!--                </exclusion>-->
-        <!--            </exclusions>-->
-        <!--        </dependency>-->
     </dependencies>
 
 

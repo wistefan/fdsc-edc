@@ -17,7 +17,7 @@ public class TMFConfig {
 
     private static final String TMF_EXTENSION_CONFIG_PATH = "tmfExtension";
     private static final String TMF_EXTENSION_CATALOG_CONFIG_PATH = "tmfExtension.catalog";
-    private static final URI DEFAULT_SCHEMA_BASE_URI = URI.create("https://raw.githubusercontent.com/wistefan/edc-dsc/refs/heads/init/schemas");
+    private static final URI DEFAULT_SCHEMA_BASE_URI = URI.create("https://raw.githubusercontent.com/wistefan/edc-dsc/refs/heads/init/schemas/");
 
     // should storage in TMForum be enabled
     private boolean enabled;
