@@ -67,10 +67,10 @@ jobs:
             username: ${{ secrets.QUAY_USERNAME }}
             password: ${{ secrets.QUAY_PASSWORD }}
 
-        - name: Build image
+        - name: Build&Push image
           run: |
             mvn versions:set -DnewVersion=${{ needs.generate-version.outputs.version }}
-            mvn clean install -Dimage.registry="${{ env.REGISTRY }}" -Dimage.repository="${{ env.REPOSITORY }}"
+            mvn clean deploy -Dimage.registry="${{ env.REGISTRY }}" -Dimage.repository="${{ env.REPOSITORY }}"
 
     git-release:
       needs: [ "generate-version","build-and-push" ]
