@@ -11,6 +11,7 @@ public class TransferMapper {
 
     private static final String WELL_KOWN_OPEN_ID_CONFIGURATION = "/.well-known/openid-configuration";
     private static final String WELL_KNOWN_ENDPOINT_TEMPLATE = "/services/%s" + WELL_KOWN_OPEN_ID_CONFIGURATION;
+    private static final String REWRITE_TEMPLATE = "^/%s/(.*)";
     private static final String DISCOVERY_ENDPOINT_TEMPLATE = "%s" + WELL_KNOWN_ENDPOINT_TEMPLATE;
     private static final String SERVICE_ROUTE_ID = "%s-service";
     private static final String WELL_KNOWN_ROUTE_ID = "%s-well-known";
@@ -45,6 +46,9 @@ public class TransferMapper {
                 .setWithBody(true)
                 .setWithRoute(true);
 
+        // remove the process id from the path before forwarding to the upstream
+        ProxyRewritePlugin proxyRewritePlugin = new ProxyRewritePlugin()
+                .setRegexUri(List.of(String.format(REWRITE_TEMPLATE, resourceDefinition.getTransferProcessId()), "/$1"));
 
         OpenidConnectPlugin openidConnectPlugin = new OpenidConnectPlugin()
                 .setBearerOnly(true)
@@ -62,7 +66,8 @@ public class TransferMapper {
                 .setUri("/" + resourceDefinition.getTransferProcessId() + "/*")
                 .setPlugins(Map.of(
                         openidConnectPlugin.getPluginName(), openidConnectPlugin,
-                        opaPlugin.getPluginName(), opaPlugin));
+                        opaPlugin.getPluginName(), opaPlugin,
+                        proxyRewritePlugin.getPluginName(), proxyRewritePlugin));
     }
 
     public Route toWellknownRouteRoute(FDSCProviderResourceDefinition resourceDefinition) {
