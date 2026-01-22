@@ -8,6 +8,7 @@ public class OpaPlugin extends ApisixPlugin {
     private String host;
     private String policy;
     private boolean withBody;
+    private boolean withRoute;
 
     public String getHost() {
         return host;
@@ -35,6 +36,17 @@ public class OpaPlugin extends ApisixPlugin {
     @JsonProperty("with_body")
     public OpaPlugin setWithBody(boolean withBody) {
         this.withBody = withBody;
+        return this;
+    }
+
+    @JsonProperty("with_route")
+    public boolean getWithRoute() {
+        return withRoute;
+    }
+
+    @JsonProperty("with_route")
+    public OpaPlugin setWithRoute(boolean withRoute) {
+        this.withRoute= withRoute;
         return this;
     }
 

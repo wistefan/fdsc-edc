@@ -52,7 +52,7 @@ public class OdrlPapClient extends BaseClient {
         }
     }
 
-    public void createPolicy(String serviceId, Policy policy) {
+    public void createPolicy(String serviceId, Object policy) {
         HttpUrl.Builder urlBuilder = HttpUrl.parse(baseUrl).newBuilder();
         urlBuilder.addPathSegment(SERVICE_PATH);
         urlBuilder.addPathSegment(serviceId);
@@ -65,8 +65,9 @@ public class OdrlPapClient extends BaseClient {
             monitor.warning("Was not able to parse policy.", e);
             throw new IllegalArgumentException("Was not able to parse policy.", e);
         }
-
-        Request request = new Request.Builder().url(urlBuilder.build()).post(RequestBody.create(policyString, JSON)).build();
+        HttpUrl url = urlBuilder.build();
+        monitor.info("Create policy " + url.url());
+        Request request = new Request.Builder().url(url).post(RequestBody.create(policyString, JSON)).build();
         Optional.ofNullable(executeRequest(request).body()).ifPresent(ResponseBody::close);
     }
 

@@ -30,6 +30,7 @@ import org.seamware.tmforum.agreement.model.CharacteristicVO;
 import org.seamware.tmforum.agreement.model.ProductRefVO;
 import org.seamware.tmforum.agreement.model.RelatedPartyVO;
 import org.seamware.tmforum.party.model.OrganizationVO;
+import org.seamware.tmforum.productcatalog.model.ProductSpecificationCharacteristicVO;
 import org.seamware.tmforum.productorder.model.ProductOrderUpdateVO;
 import org.seamware.tmforum.productorder.model.ProductOrderVO;
 import org.seamware.tmforum.quote.model.ProductOfferingRefVO;
@@ -56,6 +57,7 @@ public class TMFEdcMapper {
     public static final String PRODUCT_SPEC_CHAR_KEY = "productSpecCharacteristic";
     public static final String ENDPOINT_URL_KEY = "endpointUrl";
     public static final String ENDPOINT_DESCRIPTION_KEY = "endpointDescription";
+    public static final String UPSTREAM_ADDRESS_KEY = "upstreamAddress";
     public static final String TMF_ID_KEY = "tmfId";
     public static final String PRODUCT_SPEC_CHAR_VALUE = "productSpecCharacteristicValue";
     public static final String UID_KEY = "odrl:uid";
@@ -83,6 +85,7 @@ public class TMFEdcMapper {
     private static final String DEFINITION_ID_KEY = "id";
     private static final String DEFINITION_TRANSFER_PROCESS_ID_KEY = "transferProcessId";
     public static final String QUOTE_ITEM_ADD_ACTION = "add";
+    public static final String FDSC_DATA_ADDRESS_TYPE = "FDSC";
 
     private final Monitor monitor;
     private final ObjectMapper objectMapper;
@@ -199,25 +202,6 @@ public class TMFEdcMapper {
         return Optional.empty();
     }
 
-    /**
-     * PROVIDER STATES:
-     * 200 REQUESTED
-     * 300 OFFERING
-     * 800 ACCEPTED
-     * 825 AGREEING
-     * 1100 VERIFIED
-     * 1150 FINALIZING
-     * 1300 TERMINATING
-     * <p>
-     * CONSUMER STATES:
-     * 50 INITIAL
-     * 100 REQUESTING
-     * 700 ACCEPTING
-     * 850 AGREED
-     * 1050 VERIFYING
-     * 1300 TERMINATING
-     */
-
     public ContractNegotiation toContractNegotiation(List<ExtendableQuoteVO> quoteVOs, AgreementApiClient agreementApiClient, ParticipantResolver participantResolver, String participantId) {
 
         ContractNegotiation.Builder contractNegotiationBuilder = ContractNegotiation.Builder.newInstance();
@@ -283,31 +267,6 @@ public class TMFEdcMapper {
                     .map(this::toContractAgreement)
                     .ifPresent(contractNegotiationBuilder::contractAgreement);
 
-//            ContractAgreement.Builder contractAgreementBuilder = ContractAgreement.Builder.newInstance()
-//                    .consumerId(negotiationParticipants.getConsumerId())
-//                    .providerId(negotiationParticipants.getProviderId());
-//            List<ExtendableQuoteItemVO> quoteItemVOS = newestQuoteVo.getExtendableQuoteItem()
-//                    .stream()
-//                    .filter(eqi -> eqi.getState().equals(QuoteStateTypeVO.ACCEPTED.getValue()) || eqi.getState().equals(QuoteStateTypeVO.APPROVED.getValue()))
-//                    .toList();
-//            if (quoteItemVOS.size() != 1) {
-//                throw new IllegalArgumentException("After a successful negotiation, exactly one successfully accepted QuoteItem should exist.");
-//            }
-//            ExtendableQuoteItemVO acceptedItem = quoteItemVOS.getFirst();
-//
-//            Policy agreementPolicy = acceptedItem.getPolicy();
-//            if (!negotiationParticipants.participantsAvailable()) {
-//                throw new IllegalArgumentException("The quote need to contain a consumer and a provider.");
-//            }
-//            agreementPolicy = agreementPolicy.toBuilder()
-//                    .assigner(negotiationParticipants.getProviderId())
-//                    .assignee(negotiationParticipants.getConsumerId())
-//                    .type(PolicyType.CONTRACT)
-//                    .build();
-//            contractAgreementBuilder.policy(agreementPolicy);
-//
-//            contractAgreementBuilder.assetId(acceptedItem.getDatasetId());
-//            contractNegotiationBuilder.contractAgreement(contractAgreementBuilder.build());
         }
         return contractNegotiationBuilder.build();
 
@@ -407,10 +366,21 @@ public class TMFEdcMapper {
         Optional<ContractOfferId> optionalContractOfferId = ContractOfferId.parseId(productOffering.getExternalId()).asOptional();
 
         DataAddress.Builder dataAddressBuilder = DataAddress.Builder.newInstance()
-                .type("FDSC");
+                .type(FDSC_DATA_ADDRESS_TYPE);
 
-        productSpecification.map(ExtendableProductSpecification::getProductSpecCharacteristic)
-                .orElse(List.of())
+
+        List<ProductSpecificationCharacteristicVO> specChars = productSpecification.map(ExtendableProductSpecification::getProductSpecCharacteristic)
+                .orElse(List.of());
+        Optional<String> upstreamAddressKey = specChars.stream()
+                .map(ProductSpecificationCharacteristicVO::getId)
+                .filter(UPSTREAM_ADDRESS_KEY::equals)
+                .findAny();
+        if (upstreamAddressKey.isEmpty()) {
+            monitor.info("The given product specification cannot be used for DSP, since it does not contain an upstreamAddress.");
+            return Optional.empty();
+        }
+
+        specChars
                 .forEach(spec -> {
                     switch (spec.getId()) {
                         case ENDPOINT_URL_KEY -> getValue(spec.getProductSpecCharacteristicValue()).ifPresent(url -> dataAddressBuilder.property(ENDPOINT_URL_KEY, url));

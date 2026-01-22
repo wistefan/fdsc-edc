@@ -32,6 +32,5 @@ public abstract class PolicyMixin {
     @JsonProperty("assignee")
     abstract String getAssignee();
 
-
 }
 

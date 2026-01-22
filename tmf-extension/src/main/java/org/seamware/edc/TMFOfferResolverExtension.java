@@ -37,7 +37,8 @@ public class TMFOfferResolverExtension implements ServiceExtension {
     public void initialize(ServiceExtensionContext context) {
         if(TMFConfig.fromConfig(context.getConfig()).isEnabled()) {
             context.registerService(ConsumerOfferResolver.class, new TMForumConsumerOfferResolver(monitor, productCatalogApiClient, tmfEdcMapper));
+        } else {
+            monitor.info("TMFExtension is not enabled, TMForumConsumerOfferResolver will not be registered.");
         }
-        monitor.info("TMFExtension is not enabled, TMForumConsumerOfferResolver will not be registered.");
     }
 }

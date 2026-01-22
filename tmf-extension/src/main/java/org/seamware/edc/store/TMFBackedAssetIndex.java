@@ -35,13 +35,12 @@ public class TMFBackedAssetIndex implements AssetIndex {
 
     @Override
     public Stream<Asset> queryAssets(QuerySpec querySpec) {
-        monitor.warning("queryAssets");
-        return Stream.empty();
+        // TODO: implement
+        throw new UnsupportedOperationException("Querying for assets currently is not supported");
     }
 
     @Override
     public Asset findById(String s) {
-        monitor.warning("findById " + s);
         return productCatalogApiClient
                 .getProductOfferingByAssetId(s)
                 .map(offering -> tmfEdcMapper.assetFromProductOffering(offering, getProductSpec(offering)))
@@ -59,21 +58,20 @@ public class TMFBackedAssetIndex implements AssetIndex {
 
     @Override
     public StoreResult<Void> create(Asset asset) {
-        monitor.warning("create");
-        return null;
+        // TODO: implement
+        throw new UnsupportedOperationException();
     }
 
     @Override
     public StoreResult<Asset> deleteById(String s) {
-        monitor.warning("deleteById");
-        return null;
+        // TODO: implement
+        throw new UnsupportedOperationException();
     }
 
     @Override
     public long countAssets(List<Criterion> criteria) {
 
         Predicate<Asset> predicate = criteria.stream()
-                .peek(c -> monitor.warning("Criterion " + c.toString()))
                 .map(criterionOperatorRegistry::<Asset>toPredicate)
                 .reduce(x -> true, Predicate::and);
 
@@ -99,8 +97,8 @@ public class TMFBackedAssetIndex implements AssetIndex {
 
     @Override
     public StoreResult<Asset> updateAsset(Asset asset) {
-        monitor.warning("Update asset");
-        return null;
+        // TODO: implement
+        throw new UnsupportedOperationException();
     }
 
     @Override

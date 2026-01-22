@@ -52,7 +52,7 @@ public class OID4VPIdentityService implements org.eclipse.edc.spi.iam.IdentitySe
             RequestParameters requestParameters = new RequestParameters(URI.create(audURI.getScheme() + "://" + audURI.getAuthority()), "", clientId, scope);
             return oid4VPClient.getAccessToken(requestParameters)
                     .thenApply(tr -> TokenRepresentation.Builder.newInstance()
-                            .token(tr.getAccessToken())
+                            .token("Bearer " + tr.getAccessToken())
                             .expiresIn(tr.getExpiresIn())
                             .build())
                     .thenApply(Result::success)
@@ -73,14 +73,15 @@ public class OID4VPIdentityService implements org.eclipse.edc.spi.iam.IdentitySe
     @Override
     public Result<ClaimToken> verifyJwtToken(TokenRepresentation tokenRepresentation, VerificationContext verificationContext) {
         try {
-            JWT jwt = JWTParser.parse(tokenRepresentation.getToken());
+            String plainToken = tokenRepresentation.getToken().replaceFirst("Bearer ", "");
+            JWT jwt = JWTParser.parse(plainToken);
 
             Map<String, Object> claims = jwt.getJWTClaimsSet().getClaims();
             ClaimToken.Builder tokenBuilder = ClaimToken.Builder.newInstance();
             claims.forEach(tokenBuilder::claim);
             return Result.success(tokenBuilder.build());
         } catch (ParseException e) {
-            return Result.failure("Was not able to read the token " + e.getMessage());
+            return Result.failure("[OID4VPIdentityService] Was not able to read the token " + e.getMessage() + " '" + tokenRepresentation.getToken() + "'");
         }
     }
 }

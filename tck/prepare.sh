@@ -122,7 +122,7 @@ grep -E '^[A-Za-z0-9_]+DATASETID=' "$PROPERTIES_FILE" | while IFS='=' read -r ke
                           \"isBundle\": false,
                           \"isSellable\": true,
                           \"lifecycleStatus\": \"Active\",
-                          \"@schemaLocation\": \"https://raw.githubusercontent.com/wistefan/edc-dsc/refs/heads/init/external-id.json\",
+                          \"@schemaLocation\": \"https://raw.githubusercontent.com/wistefan/edc-dsc/refs/heads/init/schemas/external-id.json\",
                           \"externalId\": \"${existing_external_key}\",
                           \"productSpecification\":
                               {
@@ -135,7 +135,7 @@ grep -E '^[A-Za-z0-9_]+DATASETID=' "$PROPERTIES_FILE" | while IFS='=' read -r ke
                           \"productOfferingTerm\": [
                             {
                               \"name\": \"edc:contractDefinition\",
-                              \"@schemaLocation\": \"https://raw.githubusercontent.com/wistefan/edc-dsc/refs/heads/init/contract-definition.json\",
+                              \"@schemaLocation\": \"https://raw.githubusercontent.com/wistefan/edc-dsc/refs/heads/init/schemas/contract-definition.json\",
                               \"contractPolicy\": {
                                 \"odrl:uid\": \"${contract_policy_id}\",
                                 \"assigner\": \"did:web:provider.io\",
@@ -243,7 +243,7 @@ grep -E '^[A-Za-z0-9_]+AGREEMENTID=' "$PROPERTIES_FILE" | while IFS='=' read -r 
                     \"isBundle\": false,
                     \"isSellable\": true,
                     \"lifecycleStatus\": \"Active\",
-                    \"@schemaLocation\": \"https://raw.githubusercontent.com/wistefan/edc-dsc/refs/heads/init/external-id.json\",
+                    \"@schemaLocation\": \"https://raw.githubusercontent.com/wistefan/edc-dsc/refs/heads/init/schemas/external-id.json\",
                     \"externalId\": \"${external_key}\",
                     \"productSpecification\":
                         {
@@ -256,7 +256,7 @@ grep -E '^[A-Za-z0-9_]+AGREEMENTID=' "$PROPERTIES_FILE" | while IFS='=' read -r 
                     \"productOfferingTerm\": [
                       {
                         \"name\": \"edc:contractDefinition\",
-                        \"@schemaLocation\": \"https://raw.githubusercontent.com/wistefan/edc-dsc/refs/heads/init/contract-definition.json\",
+                        \"@schemaLocation\": \"https://raw.githubusercontent.com/wistefan/edc-dsc/refs/heads/init/schemas/contract-definition.json\",
                         \"contractPolicy\": {
                           \"uid\": \"${contract_policy_id}\",
                           \"assigner\": \"did:web:provider.io\",
@@ -300,7 +300,7 @@ grep -E '^[A-Za-z0-9_]+AGREEMENTID=' "$PROPERTIES_FILE" | while IFS='=' read -r 
         -d "{
               \"name\": \"testProduct\",
               \"status\": \"active\",
-              \"@schemaLocation\": \"https://raw.githubusercontent.com/wistefan/edc-dsc/refs/heads/init/external-id.json\",
+              \"@schemaLocation\": \"https://raw.githubusercontent.com/wistefan/edc-dsc/refs/heads/init/schemas/external-id.json\",
               \"externalId\":\"${assetId}\",
               \"relatedParty\": [
                 {
@@ -325,7 +325,7 @@ grep -E '^[A-Za-z0-9_]+AGREEMENTID=' "$PROPERTIES_FILE" | while IFS='=' read -r 
       -d "{
             \"name\": \"testProduct\",
             \"status\": \"active\",
-            \"@schemaLocation\": \"https://raw.githubusercontent.com/wistefan/edc-dsc/refs/heads/init/external-id.json\",
+            \"@schemaLocation\": \"https://raw.githubusercontent.com/wistefan/edc-dsc/refs/heads/init/schemas/external-id.json\",
             \"externalId\":\"${assetId}\",
             \"relatedParty\": [
               {
@@ -349,7 +349,7 @@ grep -E '^[A-Za-z0-9_]+AGREEMENTID=' "$PROPERTIES_FILE" | while IFS='=' read -r 
     -d "{
           \"agreementType\": \"test\",
           \"name\": \"testAgreement\",
-          \"@schemaLocation\": \"https://raw.githubusercontent.com/wistefan/edc-dsc/refs/heads/init/external-id.json\",
+          \"@schemaLocation\": \"https://raw.githubusercontent.com/wistefan/edc-dsc/refs/heads/init/schemas/external-id.json\",
           \"externalId\":\"${existing_external_key}\",
           \"agreementItem\": [
             {

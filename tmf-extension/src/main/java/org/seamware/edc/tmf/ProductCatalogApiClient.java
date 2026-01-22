@@ -9,6 +9,7 @@ import okhttp3.ResponseBody;
 import org.eclipse.edc.connector.controlplane.contract.spi.ContractOfferId;
 import org.eclipse.edc.policy.model.Policy;
 import org.eclipse.edc.spi.monitor.Monitor;
+import org.seamware.edc.SchemaBaseUriHolder;
 import org.seamware.edc.domain.ExtendableProductOffering;
 import org.seamware.edc.domain.ExtendableProductOfferingTerm;
 import org.seamware.edc.domain.ExtendableProductSpecification;
@@ -194,7 +195,7 @@ public class ProductCatalogApiClient extends ApiClient {
 
             HttpUrl.Builder urlBuilder = HttpUrl.parse(baseUrl).newBuilder();
             urlBuilder.addPathSegment(PRODUCT_OFFERING_PATH);
-            urlBuilder.addQueryParameter("atSchemaLocation", EXTERNAL_ID_SCHEMA);
+            urlBuilder.addQueryParameter("atSchemaLocation", SchemaBaseUriHolder.get().resolve(EXTERNAL_ID_SCHEMA).toString());
             urlBuilder.addQueryParameter(LIMIT_PARAM, "100");
             urlBuilder.addQueryParameter(OFFSET_PARAM, String.valueOf(offset));
             Request request = new Request.Builder().url(urlBuilder.build()).build();

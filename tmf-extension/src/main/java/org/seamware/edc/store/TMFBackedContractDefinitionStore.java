@@ -24,14 +24,11 @@ public class TMFBackedContractDefinitionStore implements ContractDefinitionStore
 
     @Override
     public @NotNull Stream<ContractDefinition> findAll(QuerySpec querySpec) {
-        monitor.warning("Find " + querySpec.toString());
-        return Stream.empty();
+        throw new UnsupportedOperationException("Querying for contract definitions is currently not supported.");
     }
 
     @Override
     public ContractDefinition findById(String s) {
-        monitor.warning("Get contract definition " + s);
-
         return productCatalogApi.getProductOfferingByExternalId(s)
                 .map(tmfEdcMapper::fromProductOffer)
                 .orElseThrow(() -> new IllegalArgumentException(String.format("No offering for %s does exist.", s)));
@@ -46,14 +43,11 @@ public class TMFBackedContractDefinitionStore implements ContractDefinitionStore
 
     @Override
     public StoreResult<Void> update(ContractDefinition contractDefinition) {
-        monitor.warning("update by id " + contractDefinition.toString());
-
-        return null;
+        throw new UnsupportedOperationException("Updating contract definitions is currently not supported.");
     }
 
     @Override
     public StoreResult<ContractDefinition> deleteById(String s) {
-        monitor.warning("deleteById");
-        return null;
+        throw new UnsupportedOperationException("Deleting contract definitions is currently not supported.");
     }
 }

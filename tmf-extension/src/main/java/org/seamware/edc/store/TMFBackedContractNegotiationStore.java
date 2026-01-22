@@ -87,6 +87,9 @@ public class TMFBackedContractNegotiationStore implements ContractNegotiationSto
     public @Nullable ContractAgreement findContractAgreement(String s) {
         monitor.debug("Find agreement " + s);
         return agreementApi.findByContractId(s)
+                // only "AGREED" agreements can be considered as agreement in the terms of DSP
+                .filter(agreement -> agreement.getStatus() != null)
+                .filter(agreement -> agreement.getStatus().equals(AgreementState.AGREED.getValue()))
                 .map(tmfEdcMapper::toContractAgreement)
                 .orElse(null);
     }
@@ -94,8 +97,7 @@ public class TMFBackedContractNegotiationStore implements ContractNegotiationSto
 
     @Override
     public StoreResult<Void> deleteById(String s) {
-        monitor.warning("deleteById");
-        return null;
+        throw new UnsupportedOperationException("Deletion is currently not supported.");
     }
 
     @Override
@@ -133,6 +135,9 @@ public class TMFBackedContractNegotiationStore implements ContractNegotiationSto
                 .reduce(x -> true, Predicate::and);
         return agreementVOS
                 .stream()
+                // only "AGREED" agreements can be considered as agreement in the terms of DSP
+                .filter(agreement -> agreement.getStatus() != null)
+                .filter(agreement -> agreement.getStatus().equals(AgreementState.AGREED.getValue()))
                 .map(tmfEdcMapper::toContractAgreement)
                 .filter(filterPredicate);
     }
@@ -292,8 +297,11 @@ public class TMFBackedContractNegotiationStore implements ContractNegotiationSto
                         // we cannot throw something here, since it somehow kills an internal edc worker...
                         monitor.warning(String.format("Cannot save transition to %s for %s.", negotiationState.name(), contractNegotiation.getId()));
                     } else {
+                        monitor.warning("Cn " + objectMapper.writeValueAsString(contractNegotiation));
                         updateQuote(activeQuote.get(), contractNegotiation, QuoteStateTypeVO.ACCEPTED);
-                        createAgreement(activeQuote.get(), contractNegotiation);
+                        if (contractNegotiation.getContractAgreement() != null) {
+                            createAgreement(contractNegotiation);
+                        }
                     }
                 }
                 case OFFERING, OFFERED -> {
@@ -465,7 +473,7 @@ public class TMFBackedContractNegotiationStore implements ContractNegotiationSto
         quoteApi.updateQuote(orginialQuote.getId(), quoteUpdateVO);
     }
 
-    private void createAgreement(ExtendableQuoteVO originalQuote, ContractNegotiation contractNegotiation) {
+    private void createAgreement(ContractNegotiation contractNegotiation) {
         ExtendableAgreementVO agreementVO = tmfEdcMapper.toAgreement(contractNegotiation.getId(), contractNegotiation.getContractAgreement());
         // refer to the offering, as long as no product exists
         agreementVO.addAgreementItemItem(new AgreementItemVO().addTermOrConditionItem(new AgreementTermOrConditionVO()

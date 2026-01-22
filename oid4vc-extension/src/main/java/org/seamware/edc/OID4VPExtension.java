@@ -19,12 +19,15 @@ import io.github.wistefan.oid4vp.credentials.CredentialsRepository;
 import io.github.wistefan.oid4vp.credentials.FileSystemCredentialsRepository;
 import io.github.wistefan.oid4vp.mapping.CredentialFormatDeserializer;
 import io.github.wistefan.oid4vp.mapping.TrustedAuthorityTypeDeserializer;
+import okhttp3.EventListener;
+import okhttp3.OkHttpClient;
+import okhttp3.logging.HttpLoggingInterceptor;
+import okhttp3.logging.LoggingEventListener;
 import org.bouncycastle.jce.provider.BouncyCastleProvider;
 import org.eclipse.edc.protocol.spi.DefaultParticipantIdExtractionFunction;
+import org.eclipse.edc.runtime.metamodel.annotation.Configuration;
 import org.eclipse.edc.runtime.metamodel.annotation.Inject;
 import org.eclipse.edc.runtime.metamodel.annotation.Provider;
-import org.eclipse.edc.runtime.metamodel.annotation.Provides;
-import org.eclipse.edc.runtime.metamodel.annotation.Requires;
 import org.eclipse.edc.spi.iam.AudienceResolver;
 import org.eclipse.edc.spi.iam.IdentityService;
 import org.eclipse.edc.spi.monitor.Monitor;
@@ -34,13 +37,13 @@ import org.seamware.edc.identity.CounterPartyAddressAudienceResolver;
 import org.seamware.edc.identity.OID4VPIdentityService;
 import org.seamware.edc.identity.OID4VPParticipantIdExtractionFunction;
 
-import javax.net.ssl.HttpsURLConnection;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.TrustManager;
 import javax.net.ssl.X509TrustManager;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.InetSocketAddress;
+import java.net.Proxy;
 import java.net.ProxySelector;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -48,18 +51,24 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.security.*;
+import java.security.KeyFactory;
+import java.security.NoSuchAlgorithmException;
+import java.security.PrivateKey;
+import java.security.Security;
 import java.security.cert.*;
-import java.security.cert.Certificate;
 import java.security.spec.InvalidKeySpecException;
 import java.security.spec.PKCS8EncodedKeySpec;
 import java.util.*;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 public class OID4VPExtension implements ServiceExtension {
 
     private static final String OID4VC_NAME = "OID4VPExtension";
+
+    @Inject
+    private OkHttpClient okHttpClient;
     @Inject
     private ObjectMapper objectMapper;
     @Inject
@@ -141,6 +150,7 @@ public class OID4VPExtension implements ServiceExtension {
 
             // allows configuration of additional trust anchors
             Set<TrustAnchor> trustAnchors = Optional.ofNullable(config.getTrustAnchorsFolder())
+                    .filter(taf -> !taf.isBlank())
                     .map(OID4VPExtension::loadCertificatesFromFolder)
                     .orElse(List.of())
                     .stream()

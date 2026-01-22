@@ -8,7 +8,6 @@ import org.eclipse.edc.connector.controlplane.transfer.spi.store.TransferProcess
 import org.eclipse.edc.connector.dataplane.selector.spi.instance.DataPlaneInstance;
 import org.eclipse.edc.connector.dataplane.selector.spi.instance.DataPlaneInstanceStates;
 import org.eclipse.edc.connector.dataplane.selector.spi.store.DataPlaneInstanceStore;
-import org.eclipse.edc.connector.dataplane.spi.Endpoint;
 import org.eclipse.edc.connector.dataplane.spi.edr.EndpointDataReferenceServiceRegistry;
 import org.eclipse.edc.connector.dataplane.spi.iam.PublicEndpointGeneratorService;
 import org.eclipse.edc.runtime.metamodel.annotation.Inject;
@@ -21,7 +20,6 @@ import org.seamware.edc.apisix.ApisixAdminClient;
 import org.seamware.edc.ccs.CredentialsConfigServiceClient;
 import org.seamware.edc.pap.OdrlPapClient;
 import org.seamware.edc.tmf.ProductCatalogApiClient;
-import org.seamware.edc.transfer.FDSCEndpointGenerator;
 import org.seamware.edc.transfer.FDSCProviderResourceDefinitionGenerator;
 import org.seamware.edc.transfer.FDSCProvisioner;
 import org.seamware.edc.transfer.TransferMapper;
@@ -154,14 +152,5 @@ public class FDSCTransferControlExtension implements ServiceExtension {
         }
         return transferMapper;
     }
-
-//
-//    @Provider
-//    public TransferProcessStore transferProcessStore() {
-//        if (transferProcessStore == null) {
-//            transferProcessStore = new TMFBackedTransferProcessStore(monitor, tmfEdcMapper, transactionContext, criterionOperatorRegistry, usageApi, agreementApi, productInventoryApi);
-//        }
-//        return transferProcessStore;
-//    }
 
 }

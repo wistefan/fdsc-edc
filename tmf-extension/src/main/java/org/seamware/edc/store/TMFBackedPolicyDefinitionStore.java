@@ -30,8 +30,6 @@ public class TMFBackedPolicyDefinitionStore implements PolicyDefinitionStore {
 
     @Override
     public PolicyDefinition findById(String policyDefinitionId) {
-        LOGGER.warning("Find policy " + policyDefinitionId);
-
         Policy policy = productCatalogApiClient.getByPolicyId(policyDefinitionId);
 
         return PolicyDefinition.Builder.newInstance()
@@ -42,29 +40,21 @@ public class TMFBackedPolicyDefinitionStore implements PolicyDefinitionStore {
 
     @Override
     public Stream<PolicyDefinition> findAll(QuerySpec querySpec) {
-        monitor.warning("Find all Policy Definitions");
-        return Stream.empty();
+        throw new UnsupportedOperationException("Querying for policy definitions currently is unsupported.");
     }
 
     @Override
     public StoreResult<PolicyDefinition> create(PolicyDefinition policyDefinition) {
-        try {
-            monitor.warning("Create Policy Definition " + objectMapper.writeValueAsString(policyDefinition));
-        } catch (JsonProcessingException e) {
-            throw new RuntimeException(e);
-        }
-        return StoreResult.success(policyDefinition);
+        throw new UnsupportedOperationException("Creating policy definitions currently is unsupported.");
     }
 
     @Override
     public StoreResult<PolicyDefinition> update(PolicyDefinition policyDefinition) {
-        monitor.warning("Update Policy Definitions");
-        return null;
+        throw new UnsupportedOperationException("Updating policy definitions currently is unsupported.");
     }
 
     @Override
     public StoreResult<PolicyDefinition> delete(String s) {
-        monitor.warning("Delete Policy Definitions");
-        return null;
+        throw new UnsupportedOperationException("Deleting policy definitions currently is unsupported.");
     }
 }
