@@ -21,10 +21,12 @@ import org.eclipse.edc.spi.iam.RequestContext;
 import org.eclipse.edc.spi.monitor.Monitor;
 import org.eclipse.edc.spi.response.ResponseStatus;
 import org.eclipse.edc.spi.response.StatusResult;
+import org.seamware.credentials.model.MetaDataQueryVO;
 import org.seamware.credentials.model.ServiceVO;
 import org.seamware.edc.apisix.ApisixAdminClient;
 import org.seamware.edc.apisix.Route;
 import org.seamware.edc.ccs.CredentialsConfigServiceClient;
+import org.seamware.edc.ccs.MetaQueryMixin;
 import org.seamware.edc.domain.ExtendableProductSpecification;
 import org.seamware.edc.pap.*;
 import org.seamware.edc.store.TMFEdcMapper;
@@ -68,6 +70,7 @@ public class FDSCOID4VPProvisioner extends FDSCProvisioner<FDSCOID4VPProviderRes
         this.tmfEdcMapper = tmfEdcMapper;
         this.jsonLd = jsonLd;
         this.objectMapper.configure(DeserializationFeature.FAIL_ON_MISSING_CREATOR_PROPERTIES, false);
+        this.objectMapper.addMixIn(MetaDataQueryVO.class, MetaQueryMixin.class);
     }
 
     @Override
