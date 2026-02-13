@@ -34,6 +34,8 @@
         <version.org.junit>5.13.4</version.org.junit>
         <version.org.mockito>5.12.0</version.org.mockito>
 
+        <version.org.apache.maven.plugins.maven-surfire-plugin>3.5.3</version.org.apache.maven.plugins.maven-surfire-plugin>
+
         <main.basedir>${project.basedir}</main.basedir>
         <image.registry>quay.io</image.registry>
         <image.repository>wi_stefan</image.repository>
@@ -92,6 +94,11 @@
                         </configuration>
                     </execution>
                 </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>${version.org.apache.maven.plugins.maven-surfire-plugin}</version>
             </plugin>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>

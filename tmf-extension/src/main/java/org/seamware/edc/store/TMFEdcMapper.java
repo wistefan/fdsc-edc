@@ -57,12 +57,9 @@ public class TMFEdcMapper {
     public static final String POT_NAME_CONTRACT_DEFINITION = "edc:contractDefinition";
     public static final String CONTRACT_POLICY_KEY = "contractPolicy";
     public static final String ACCESS_POLICY_KEY = "accessPolicy";
-    public static final String PRODUCT_SPEC_CHAR_KEY = "productSpecCharacteristic";
     public static final String ENDPOINT_URL_KEY = "endpointUrl";
     public static final String ENDPOINT_DESCRIPTION_KEY = "endpointDescription";
     public static final String UPSTREAM_ADDRESS_KEY = "upstreamAddress";
-    public static final String TMF_ID_KEY = "tmfId";
-    public static final String PRODUCT_SPEC_CHAR_VALUE = "productSpecCharacteristicValue";
     public static final String UID_KEY = "http://www.w3.org/ns/odrl/2/uid";
     public static final String USAGE_CHARACTERISTIC_ASSET_ID = "asset-id";
     public static final String USAGE_CHARACTERISTIC_CORRELATION_ID = "correlation-id";
@@ -83,10 +80,6 @@ public class TMFEdcMapper {
     public static final String AGREEMENT_CHARACTERISTIC_POLICY = "policy";
     public static final String AGREEMENT_TYPE_DSP = "dspContract";
 
-    private static final String DEFINITIONS_KEY = "definition";
-    private static final String DEFINITION_ASSET_ID_KEY = "assetId";
-    private static final String DEFINITION_ID_KEY = "id";
-    private static final String DEFINITION_TRANSFER_PROCESS_ID_KEY = "transferProcessId";
     public static final String QUOTE_ITEM_ADD_ACTION = "add";
     public static final String FDSC_DATA_ADDRESS_TYPE = "FDSC";
 
