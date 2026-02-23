@@ -9,6 +9,7 @@ import org.seamware.tmforum.quote.model.QuoteVO;
 import java.net.URI;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 
 import static org.seamware.edc.domain.ExtendableQuoteCreateVO.CONTRACT_NEGOTIATION_SCHEMA;
 
@@ -58,5 +59,17 @@ public class ExtendableQuoteVO extends QuoteVO {
         return this;
     }
 
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+        if (!super.equals(o)) return false;
+        ExtendableQuoteVO quoteVO = (ExtendableQuoteVO) o;
+        return Objects.equals(quoteItem, quoteVO.quoteItem) && Objects.equals(contractNegotiationState, quoteVO.contractNegotiationState);
+    }
 
+    @Override
+    public int hashCode() {
+        return Objects.hash(super.hashCode(), quoteItem, contractNegotiationState);
+    }
 }

@@ -231,7 +231,7 @@ public class TMFContractNegotiationExtension implements ServiceExtension {
 
     public PolicyDefinitionStore policyDefinitionStore(TMFConfig tmfConfig) {
         if (policyDefinitionStore == null) {
-            policyDefinitionStore = new TMFBackedPolicyDefinitionStore(monitor, objectMapper, productCatalogApi(tmfConfig));
+            policyDefinitionStore = new TMFBackedPolicyDefinitionStore(monitor, productCatalogApi(tmfConfig));
         }
         return policyDefinitionStore;
     }

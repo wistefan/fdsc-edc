@@ -29,16 +29,19 @@ public class TMFBackedContractDefinitionStore implements ContractDefinitionStore
 
     @Override
     public ContractDefinition findById(String s) {
-        return productCatalogApi.getProductOfferingByExternalId(s)
-                .flatMap(tmfEdcMapper::fromProductOffer)
-                .orElseThrow(() -> new IllegalArgumentException(String.format("No offering for %s does exist.", s)));
+        try {
+            return productCatalogApi.getProductOfferingByExternalId(s)
+                    .flatMap(tmfEdcMapper::fromProductOffer)
+                    .orElse(null);
+        } catch (RuntimeException e) {
+            monitor.warning("Was not able to successfully resolve the product offer.", e);
+            return null;
+        }
     }
 
     @Override
     public StoreResult<Void> save(ContractDefinition contractDefinition) {
-        monitor.warning("Save by id " + contractDefinition.toString());
-
-        return StoreResult.success();
+        throw new UnsupportedOperationException("Storing contract definitions is currently not supported.");
     }
 
     @Override

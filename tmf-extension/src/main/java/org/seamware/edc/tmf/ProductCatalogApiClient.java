@@ -101,7 +101,7 @@ public class ProductCatalogApiClient extends ApiClient {
     /**
      * Get the policy by its id. Policies are stored inside product-offerings
      */
-    public Policy getByPolicyId(String policyId) {
+    public Optional<Policy> getByPolicyId(String policyId) {
 
         Optional<Policy> optionalPolicy = Optional.empty();
         boolean posAvailable = true;
@@ -134,7 +134,7 @@ public class ProductCatalogApiClient extends ApiClient {
         if (optionalPolicy.isEmpty()) {
             throw new IllegalArgumentException("No policy found.");
         }
-        return optionalPolicy.get();
+        return optionalPolicy;
     }
 
     private Optional<Policy> getFromOfferingTerm(ExtendableProductOfferingTerm extendableProductOfferingTerm, String policyId) {

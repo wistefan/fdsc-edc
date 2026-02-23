@@ -6,6 +6,7 @@ import org.seamware.edc.SchemaBaseUriHolder;
 import org.seamware.tmforum.productinventory.model.ProductVO;
 
 import java.net.URI;
+import java.util.Objects;
 
 public class ExtendableProduct extends ProductVO {
 
@@ -36,5 +37,19 @@ public class ExtendableProduct extends ProductVO {
     public ExtendableProduct setExternalId(String externalId) {
         this.externalId = externalId;
         return this;
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+        if (!super.equals(o)) return false;
+        ExtendableProduct that = (ExtendableProduct) o;
+        return Objects.equals(externalId, that.externalId);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(super.hashCode(), externalId);
     }
 }

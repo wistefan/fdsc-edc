@@ -6,6 +6,7 @@ import org.seamware.edc.SchemaBaseUriHolder;
 import org.seamware.tmforum.agreement.model.AgreementVO;
 
 import java.net.URI;
+import java.util.Objects;
 
 public class ExtendableAgreementVO extends AgreementVO {
 
@@ -47,4 +48,17 @@ public class ExtendableAgreementVO extends AgreementVO {
         return this;
     }
 
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+        if (!super.equals(o)) return false;
+        ExtendableAgreementVO that = (ExtendableAgreementVO) o;
+        return Objects.equals(externalId, that.externalId) && Objects.equals(negotiationId, that.negotiationId);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(super.hashCode(), externalId, negotiationId);
+    }
 }

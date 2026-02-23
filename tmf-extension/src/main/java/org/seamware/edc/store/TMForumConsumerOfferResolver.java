@@ -28,12 +28,17 @@ public class TMForumConsumerOfferResolver implements ConsumerOfferResolver {
     @Override
     public @NotNull ServiceResult<ValidatableConsumerOffer> resolveOffer(String offeringId) {
         monitor.debug("Resolve offer " + offeringId);
-        Optional<ContractOfferId> optionalContractOfferId = ContractOfferId.parseId(offeringId)
-                .asOptional();
-        return optionalContractOfferId.map(contractOfferId -> productCatalogApiClient.getProductOfferingByExternalId(offeringId)
-                .flatMap(epo -> tmfEdcMapper.consumerOfferFromProductOffering(epo, contractOfferId))
-                .map(ServiceResult::success)
-                .orElse(ServiceResult.notFound(String.format("Was not able to resolve offering %s.", offeringId)))).orElseGet(() -> ServiceResult.badRequest(String.format("Offering id %s is not valid.", offeringId)));
+        try {
+            Optional<ContractOfferId> optionalContractOfferId = ContractOfferId.parseId(offeringId)
+                    .asOptional();
+            return optionalContractOfferId.map(contractOfferId -> productCatalogApiClient.getProductOfferingByExternalId(offeringId)
+                    .flatMap(epo -> tmfEdcMapper.consumerOfferFromProductOffering(epo, contractOfferId))
+                    .map(ServiceResult::success)
+                    .orElse(ServiceResult.notFound(String.format("Was not able to resolve offering %s.", offeringId)))).orElseGet(() -> ServiceResult.badRequest(String.format("Offering id %s is not valid.", offeringId)));
+        } catch (RuntimeException e) {
+            monitor.warning(String.format("Was not able to resolve the offering %s.", offeringId), e);
+            return ServiceResult.unexpected(e.getMessage());
+        }
     }
 
 }

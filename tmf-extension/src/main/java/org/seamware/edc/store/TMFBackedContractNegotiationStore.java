@@ -2,6 +2,7 @@ package org.seamware.edc.store;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.eclipse.edc.connector.controlplane.asset.spi.domain.Asset;
 import org.eclipse.edc.connector.controlplane.contract.spi.ContractOfferId;
 import org.eclipse.edc.connector.controlplane.contract.spi.negotiation.store.ContractNegotiationStore;
 import org.eclipse.edc.connector.controlplane.contract.spi.types.agreement.ContractAgreement;
@@ -23,6 +24,7 @@ import org.seamware.edc.domain.*;
 import org.seamware.edc.tmf.*;
 import org.seamware.tmforum.agreement.model.AgreementItemVO;
 import org.seamware.tmforum.agreement.model.AgreementTermOrConditionVO;
+import org.seamware.tmforum.agreement.model.AgreementVO;
 import org.seamware.tmforum.agreement.model.ProductRefVO;
 import org.seamware.tmforum.productinventory.model.ProductOfferingRefVO;
 import org.seamware.tmforum.productinventory.model.ProductStatusTypeVO;
@@ -67,7 +69,11 @@ public class TMFBackedContractNegotiationStore implements ContractNegotiationSto
     private final AutomaticUnlockingLockManager lockManager;
     private final Map<String, Lease> leases = new HashMap<>();
 
-    public TMFBackedContractNegotiationStore(Monitor monitor, ObjectMapper objectMapper, QuoteApiClient quoteApi, AgreementApiClient agreementApi, ProductOrderApiClient productOrderApi, ProductCatalogApiClient productCatalogApi, ProductInventoryApiClient productInventoryApi, ParticipantResolver participantResolver, TMFEdcMapper tmfEdcMapper, String participantId, Clock clock, String controlplane, CriterionOperatorRegistry criterionOperatorRegistry) {
+    public TMFBackedContractNegotiationStore(Monitor monitor, ObjectMapper objectMapper, QuoteApiClient quoteApi,
+                                             AgreementApiClient agreementApi, ProductOrderApiClient productOrderApi,
+                                             ProductCatalogApiClient productCatalogApi, ProductInventoryApiClient productInventoryApi,
+                                             ParticipantResolver participantResolver, TMFEdcMapper tmfEdcMapper, String participantId,
+                                             Clock clock, String controlplane, CriterionOperatorRegistry criterionOperatorRegistry) {
         this.monitor = monitor;
         this.objectMapper = objectMapper;
         this.quoteApi = quoteApi;
@@ -88,14 +94,19 @@ public class TMFBackedContractNegotiationStore implements ContractNegotiationSto
     @Override
     public @Nullable ContractAgreement findContractAgreement(String s) {
         monitor.debug("Find agreement " + s);
-        return agreementApi.findByContractId(s)
-                // only "AGREED" agreements can be considered as agreement in the terms of DSP
-                .filter(agreement -> agreement.getStatus() != null)
-                .filter(agreement -> agreement.getStatus().equals(AgreementState.AGREED.getValue()))
-                .map(tmfEdcMapper::toContractAgreement)
-                .orElse(null);
-    }
+        try {
 
+            return agreementApi.findByContractId(s)
+                    // only "AGREED" agreements can be considered as agreement in the terms of DSP
+                    .filter(agreement -> agreement.getStatus() != null)
+                    .filter(agreement -> agreement.getStatus().equals(AgreementState.AGREED.getValue()))
+                    .map(tmfEdcMapper::toContractAgreement)
+                    .orElse(null);
+        } catch (RuntimeException e) {
+            monitor.warning(String.format("Was not able to map agreement %s.", s), e);
+            return null;
+        }
+    }
 
     @Override
     public StoreResult<Void> deleteById(String s) {
@@ -104,47 +115,55 @@ public class TMFBackedContractNegotiationStore implements ContractNegotiationSto
 
     @Override
     public @NotNull Stream<ContractNegotiation> queryNegotiations(QuerySpec querySpec) {
-        Map<String, List<ExtendableQuoteVO>> negotiationQuotes = new HashMap<>();
 
-        quoteApi.getQuotes(querySpec.getOffset(), querySpec.getLimit())
-                .stream()
-                // only those that this controlplane is responsible for
-                .filter(eqv -> eqv.getContractNegotiationState().getControlplane().equals(controlplane))
-                .forEach(eq -> {
-                    String negotiationId = eq.getExternalId();
-                    if (negotiationQuotes.containsKey(negotiationId)) {
-                        negotiationQuotes.get(negotiationId).add(eq);
-                    } else {
-                        List<ExtendableQuoteVO> quotes = new ArrayList<>();
-                        quotes.add(eq);
-                        negotiationQuotes.put(negotiationId, quotes);
-                    }
-                });
-        return negotiationQuotes.entrySet()
-                .stream()
-                .map(e -> tmfEdcMapper.toContractNegotiation(e.getValue(), agreementApi, participantResolver, participantId));
+        List<ContractNegotiation> negotiations = getNegotiations(querySpec.getFilterExpression());
+
+        int fromIndex = Math.min(querySpec.getOffset(), negotiations.size());
+        int toIndex = Math.min(querySpec.getOffset() + querySpec.getLimit(), negotiations.size());
+        return negotiations.subList(fromIndex, toIndex).stream();
     }
 
     @Override
     public @NotNull Stream<ContractAgreement> queryAgreements(QuerySpec querySpec) {
         monitor.debug("Query agreements " + querySpec.toString());
-        return getFilteredStream(querySpec.getFilterExpression(), agreementApi.getAgreements(querySpec.getOffset(), querySpec.getLimit()))
+        return getFilteredStream(querySpec.getFilterExpression())
+                .sorted((a1, a2) -> Comparator.<String>naturalOrder().compare(a1.getId(), a2.getId()))
                 .skip(querySpec.getOffset())
                 .limit(querySpec.getLimit());
     }
 
-    private Stream<ContractAgreement> getFilteredStream(List<Criterion> criteria, List<ExtendableAgreementVO> agreementVOS) {
+    private Stream<ContractAgreement> getFilteredStream(List<Criterion> criteria) {
         monitor.debug("getFilteredStream");
         Predicate<ContractAgreement> filterPredicate = criteria.stream()
                 .map(criterionOperatorRegistry::<ContractAgreement>toPredicate)
                 .reduce(x -> true, Predicate::and);
-        return agreementVOS
-                .stream()
-                // only "AGREED" agreements can be considered as agreement in the terms of DSP
-                .filter(agreement -> agreement.getStatus() != null)
-                .filter(agreement -> agreement.getStatus().equals(AgreementState.AGREED.getValue()))
-                .map(tmfEdcMapper::toContractAgreement)
-                .filter(filterPredicate);
+
+        List<ContractAgreement> contractAgreements = new ArrayList<>();
+        int offset = 0;
+        boolean moreOfferingsAvailable = true;
+        while (moreOfferingsAvailable) {
+            List<ExtendableAgreementVO> agreements = agreementApi.getAgreements(offset, 100);
+            agreements
+                    .stream()
+                    // only "AGREED" agreements can be considered as agreement in the terms of DSP
+                    .filter(agreement -> agreement.getStatus() != null)
+                    .filter(agreement -> agreement.getStatus().equals(AgreementState.AGREED.getValue()))
+                    .map(agreement -> {
+                        try {
+                            return tmfEdcMapper.toContractAgreement(agreement);
+                        } catch (RuntimeException e) {
+                            monitor.warning("Was not able to map agreement.", e);
+                            return null;
+                        }
+                    })
+                    .filter(Objects::nonNull)
+                    .filter(filterPredicate)
+                    .forEach(contractAgreements::add);
+
+            moreOfferingsAvailable = agreements.size() == 100;
+            offset += 100;
+        }
+        return contractAgreements.stream();
     }
 
     @Override
@@ -157,53 +176,68 @@ public class TMFBackedContractNegotiationStore implements ContractNegotiationSto
         return tmfEdcMapper.toContractNegotiation(new ArrayList<>(contractNegotiations), agreementApi, participantResolver, participantId);
     }
 
-    @Override
-    public @NotNull List<ContractNegotiation> nextNotLeased(int i, Criterion... criteria) {
-        try {
-            return lockManager.writeLock(() -> {
-                Predicate<ContractNegotiation> filterPredicate = Arrays.stream(criteria)
-                        .map(criterionOperatorRegistry::<ContractNegotiation>toPredicate)
-                        .reduce(x -> true, Predicate::and);
-                // we want no duplicates
-                Set<String> negotiationIds = new HashSet<>();
-                int offset = 0;
-                boolean moreQuotesAvailable = true;
-                int limit = 100;
-                // a negotiation might consist of multiple quotes, thus first fetch the ids and then reduce
-                // the multi calls need to be improved, current solution is bad performacne
-                while (moreQuotesAvailable && negotiationIds.size() < i) {
-                    List<ExtendableQuoteVO> extendableQuoteVOS = quoteApi.getQuotes(offset, limit);
-                    extendableQuoteVOS
-                            .stream()
-                            // only those that this controlplane is responsible for
-                            .filter(eqv -> eqv.getContractNegotiationState().getControlplane().equals(controlplane))
-                            .map(ExtendableQuoteVO::getExternalId)
-                            .forEach(negotiationIds::add);
-                    moreQuotesAvailable = extendableQuoteVOS.size() == limit;
-                    offset += limit;
-                }
-                List<ContractNegotiation> contractNegotiations;
-                contractNegotiations = negotiationIds.stream()
-                        .map(quoteApi::findByNegotiationId)
-                        .map(extendableQuoteVOS -> tmfEdcMapper.toContractNegotiation(extendableQuoteVOS, agreementApi, participantResolver, participantId))
-                        .filter(filterPredicate)
-                        .filter(e -> !isLeased(e.getId()))
-                        .map(ContractNegotiation.class::cast)
-                        .sorted(comparingLong(StatefulEntity::getStateTimestamp))
-                        .limit(i)
-                        .toList();
+    private List<ContractNegotiation> getNegotiations(List<Criterion> criteria) {
+        Predicate<ContractNegotiation> filterPredicate = criteria.stream()
+                .map(criterionOperatorRegistry::<ContractNegotiation>toPredicate)
+                .reduce(x -> true, Predicate::and);
+        // we want no duplicates
+        Map<String, List<ExtendableQuoteVO>> negotiations = new HashMap<>();
+        int offset = 0;
+        boolean moreQuotesAvailable = true;
+        int limit = 100;
+        // a negotiation might consist of multiple quotes, thus first fetch the ids and then reduce
+        // the multi calls need to be improved, current solution is bad performance
+        while (moreQuotesAvailable) {
+            List<ExtendableQuoteVO> extendableQuoteVOS = quoteApi.getQuotes(offset, limit);
+            extendableQuoteVOS
+                    .stream()
+                    .filter(eqv -> eqv.getContractNegotiationState() != null)
+                    // only those that this controlplane is responsible for
+                    .filter(eqv -> eqv.getContractNegotiationState().getControlplane().equals(controlplane))
+                    .forEach(eqv -> {
+                        if (negotiations.containsKey(eqv.getExternalId())) {
+                            negotiations.get(eqv.getExternalId()).add(eqv);
+                        } else {
+                            negotiations.put(eqv.getExternalId(), new ArrayList<>(List.of(eqv)));
+                        }
+                    });
+            moreQuotesAvailable = extendableQuoteVOS.size() == limit;
+            offset += limit;
+        }
+        return negotiations
+                .entrySet()
+                .stream()
+                .map(entry -> {
+                    try {
+                        return tmfEdcMapper.toContractNegotiation(entry.getValue(), agreementApi, participantResolver, participantId);
+                    } catch (RuntimeException e) {
+                        monitor.warning(String.format("Was not able to read negotiation %s from quotes.", entry.getKey()), e);
+                        return null;
+                    }
+                })
+                .filter(Objects::nonNull)
+                .filter(filterPredicate)
+                .sorted(comparingLong(StatefulEntity::getStateTimestamp))
+                .toList();
+    }
 
-                return contractNegotiations.stream()
-                        .filter(cn -> {
-                            try {
-                                acquireLease(cn.getId());
-                                return true;
-                            } catch (Exception e) {
-                                monitor.info(String.format("Was not able to lease %s", cn.getId()), e);
-                                return false;
-                            }
-                        }).toList();
-            });
+    @Override
+    public @NotNull List<ContractNegotiation> nextNotLeased(int max, Criterion... criteria) {
+        try {
+            return lockManager.writeLock(() -> getNegotiations(Arrays.asList(criteria))
+                    .stream()
+                    .filter(e -> !isLeased(e.getId()))
+                    .filter(cn -> {
+                        try {
+                            acquireLease(cn.getId());
+                            return true;
+                        } catch (Exception e) {
+                            monitor.info(String.format("Was not able to lease %s", cn.getId()), e);
+                            return false;
+                        }
+                    })
+                    .limit(max)
+                    .toList());
         } catch (Exception e) {
             monitor.warning("Failed to get", e);
             throw new EdcPersistenceException(e);

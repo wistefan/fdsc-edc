@@ -41,7 +41,9 @@ public class TMForumBackedCatalogProtocolService implements CatalogProtocolServi
         if (validatedToken.failed()) {
             return ServiceResult.unauthorized("Request not authorized.");
         }
-        List<ExtendableProductOffering> productOfferingVOList = productCatalogApi.getProductOfferings(catalogRequestMessage.getQuerySpec().getOffset(), catalogRequestMessage.getQuerySpec().getLimit());
+        List<ExtendableProductOffering> productOfferingVOList = productCatalogApi.getProductOfferings(
+                catalogRequestMessage.getQuerySpec().getOffset(),
+                catalogRequestMessage.getQuerySpec().getLimit());
         Catalog.Builder catalogBuilder = Catalog.Builder.newInstance();
         catalogBuilder.participantId(participantId);
 

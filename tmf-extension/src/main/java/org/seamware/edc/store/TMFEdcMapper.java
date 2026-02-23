@@ -183,7 +183,8 @@ public class TMFEdcMapper {
                         case ENDPOINT_DESCRIPTION_KEY -> getValue(spec.getProductSpecCharacteristicValue()).ifPresent(defaultDataserviceBuilder::endpointDescription);
                     }
                 });
-        String endpointDescription = defaultDataserviceBuilder.build().getEndpointDescription();
+        String endpointDescription = defaultDataserviceBuilder.build()
+                .getEndpointDescription();
 
         return endpoints.stream()
                 .map(endpoint -> DataService.Builder.newInstance()

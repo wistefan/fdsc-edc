@@ -6,11 +6,12 @@ import org.seamware.edc.SchemaBaseUriHolder;
 import org.seamware.tmforum.usage.model.UsageVO;
 
 import java.net.URI;
+import java.util.Objects;
 
 import static org.seamware.edc.domain.ExtendableUsageCreateVO.USAGE_SCHEMA;
 
 public class ExtendableUsageVO extends UsageVO {
-    
+
     @Override
     public @Nullable URI getAtSchemaLocation() {
         URI current = super.getAtSchemaLocation();
@@ -45,5 +46,19 @@ public class ExtendableUsageVO extends UsageVO {
     public ExtendableUsageVO setTransferState(String transferState) {
         this.transferState = transferState;
         return this;
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+        if (!super.equals(o)) return false;
+        ExtendableUsageVO that = (ExtendableUsageVO) o;
+        return Objects.equals(externalId, that.externalId) && Objects.equals(transferState, that.transferState);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(super.hashCode(), externalId, transferState);
     }
 }
