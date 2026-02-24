@@ -5,65 +5,69 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import org.eclipse.edc.connector.controlplane.contract.spi.types.agreement.ContractAgreement;
 import org.eclipse.edc.connector.controlplane.contract.spi.types.negotiation.ContractNegotiation;
+import org.eclipse.edc.connector.controlplane.contract.spi.types.negotiation.ContractNegotiationStates;
+import org.eclipse.edc.connector.controlplane.contract.spi.types.offer.ContractOffer;
 import org.eclipse.edc.policy.model.Policy;
 import org.eclipse.edc.spi.monitor.Monitor;
+import org.eclipse.edc.spi.persistence.EdcPersistenceException;
 import org.eclipse.edc.spi.query.CriterionOperatorRegistry;
 import org.eclipse.edc.spi.query.QuerySpec;
+import org.eclipse.edc.spi.result.StoreFailure;
+import org.eclipse.edc.spi.result.StoreResult;
+import org.eclipse.edc.util.concurrency.LockException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.seamware.edc.SchemaBaseUriHolder;
 import org.seamware.edc.domain.AgreementState;
 import org.seamware.edc.domain.ContractNegotiationState;
 import org.seamware.edc.domain.ExtendableAgreementVO;
 import org.seamware.edc.domain.ExtendableQuoteVO;
 import org.seamware.edc.tmf.*;
-import org.seamware.tmforum.agreement.model.AgreementVO;
 
+import java.net.URI;
 import java.time.Clock;
 import java.time.Instant;
-import java.time.ZoneId;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Optional;
-import java.util.stream.Collectors;
+import java.util.*;
+import java.util.function.Supplier;
 import java.util.stream.Stream;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
-import static org.mockito.ArgumentMatchers.anyInt;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.*;
 
-public class TMFBackedContractNegotiationStoreTest {
+// abstract to not be executed twice
+public abstract class TMFBackedContractNegotiationStoreTest extends AbstractStoreTest {
 
-    private static final String TEST_AGREEMENT_ID = "test-agreement";
-    private static final String TEST_PROVIDER_ID = "provider-id";
-    private static final String TEST_CONSUMER_ID = "consumer-id";
-    private static final String TEST_ASSET_ID = "asset-id";
-    private static final String TEST_POLICY_ID = "policy-id";
-    private static final String TEST_COUNTER_PARTY_ID = "counter-party-id";
-    private static final String TEST_COUNTER_PARTY_ADDRESS = "http://counter.party";
-    private static final String TEST_PROTOCOL = "v1";
-    private static final String TEST_PARTICIPANT_ID = "test-participant";
-    private static final String TEST_CONTROL_PLANE_ID = "test-control-plane";
+    protected static final String TEST_AGREEMENT_ID = "test-agreement";
+    protected static final String TEST_PROVIDER_ID = "provider-id";
+    protected static final String TEST_CONSUMER_ID = "consumer-id";
+    protected static final String TEST_ASSET_ID = "asset-id";
+    protected static final String TEST_POLICY_ID = "policy-id";
+    protected static final String TEST_COUNTER_PARTY_ID = "counter-party-id";
+    protected static final String TEST_COUNTER_PARTY_ADDRESS = "http://counter.party";
+    protected static final String TEST_PROTOCOL = "v1";
+    protected static final String TEST_PARTICIPANT_ID = "test-participant";
+    protected static final String TEST_CONTROL_PLANE_ID = "test-control-plane";
 
-    private QuoteApiClient quoteApiClient;
-    private AgreementApiClient agreementApiClient;
-    private ProductOrderApiClient productOrderApiClient;
-    private ProductCatalogApiClient productCatalogApiClient;
-    private ProductInventoryApiClient productInventoryApiClient;
-    private ParticipantResolver participantResolver;
-    private TMFEdcMapper tmfEdcMapper;
-    private CriterionOperatorRegistry criterionOperatorRegistry;
-    private Clock clock = Clock.fixed(Instant.MIN, ZoneId.systemDefault());
-
-    private TMFBackedContractNegotiationStore tmfBackedContractNegotiationStore;
+    protected QuoteApiClient quoteApiClient;
+    protected AgreementApiClient agreementApiClient;
+    protected ProductOrderApiClient productOrderApiClient;
+    protected ProductCatalogApiClient productCatalogApiClient;
+    protected ProductInventoryApiClient productInventoryApiClient;
+    protected ParticipantResolver participantResolver;
+    protected TMFEdcMapper tmfEdcMapper;
+    protected CriterionOperatorRegistry criterionOperatorRegistry;
+    protected LeaseHolder leaseHolder;
+    protected LockManager lockManager;
+    protected TMFBackedContractNegotiationStore tmfBackedContractNegotiationStore;
 
     @BeforeEach
     public void setup() {
+
+        SchemaBaseUriHolder.configure(URI.create("http://my-base.schema"));
 
         ObjectMapper objectMapper = new ObjectMapper();
         objectMapper.setSerializationInclusion(JsonInclude.Include.NON_NULL);
@@ -78,6 +82,8 @@ public class TMFBackedContractNegotiationStoreTest {
         participantResolver = mock(ParticipantResolver.class);
         tmfEdcMapper = mock(TMFEdcMapper.class);
         criterionOperatorRegistry = mock(CriterionOperatorRegistry.class);
+        leaseHolder = mock(LeaseHolder.class);
+        lockManager = mock(LockManager.class);
 
         tmfBackedContractNegotiationStore = new TMFBackedContractNegotiationStore(
                 mock(Monitor.class), objectMapper,
@@ -85,8 +91,8 @@ public class TMFBackedContractNegotiationStoreTest {
                 productOrderApiClient, productCatalogApiClient,
                 productInventoryApiClient, participantResolver,
                 tmfEdcMapper, TEST_PARTICIPANT_ID,
-                clock, TEST_CONTROL_PLANE_ID,
-                criterionOperatorRegistry);
+                TEST_CONTROL_PLANE_ID, criterionOperatorRegistry,
+                leaseHolder, lockManager);
     }
 
     @Test
@@ -95,9 +101,9 @@ public class TMFBackedContractNegotiationStoreTest {
                 .setExternalId(TEST_AGREEMENT_ID);
         extendableAgreementVO.setStatus(AgreementState.AGREED.getValue());
         when(agreementApiClient.findByContractId(eq(TEST_AGREEMENT_ID))).thenReturn(Optional.of(extendableAgreementVO));
-        when(tmfEdcMapper.toContractAgreement(eq(extendableAgreementVO))).thenReturn(getTestAgreement());
+        when(tmfEdcMapper.toContractAgreement(eq(extendableAgreementVO))).thenReturn(getTestContractAgreement());
 
-        assertEquals(getTestAgreement(), tmfBackedContractNegotiationStore.findContractAgreement(TEST_AGREEMENT_ID), "The correct agreement should be returned.");
+        assertEquals(getTestContractAgreement(), tmfBackedContractNegotiationStore.findContractAgreement(TEST_AGREEMENT_ID), "The correct agreement should be returned.");
     }
 
     @Test
@@ -132,24 +138,54 @@ public class TMFBackedContractNegotiationStoreTest {
     @MethodSource("getValidNegotiations")
     public void testQueryNegotiations_success(String name, QuerySpec querySpec, List<ExtendableQuoteVO> negotiationQuotes, int numberOfNegotiations) {
 
-        when(quoteApiClient.getQuotes(anyInt(), anyInt()))
-                .thenAnswer(invocation -> {
-                    int offset = invocation.getArgument(0);
-                    int limit = invocation.getArgument(1);
-
-                    int fromIndex = Math.min(offset, negotiationQuotes.size());
-                    int toIndex = Math.min(offset + limit, negotiationQuotes.size());
-
-                    return negotiationQuotes.subList(fromIndex, toIndex);
-                });
+        stubQuotes(negotiationQuotes);
         when(tmfEdcMapper.toContractNegotiation(any(), any(), any(), any()))
                 .thenReturn(getValidNegotiation());
         assertEquals(numberOfNegotiations, tmfBackedContractNegotiationStore.queryNegotiations(querySpec).toList().size());
     }
 
-    private static ContractNegotiation getValidNegotiation() {
+    protected void stubQuotes(List<ExtendableQuoteVO> quotes) {
+        when(quoteApiClient.getQuotes(anyInt(), anyInt()))
+                .thenAnswer(invocation -> {
+                    int offset = invocation.getArgument(0);
+                    int limit = invocation.getArgument(1);
+
+                    int fromIndex = Math.min(offset, quotes.size());
+                    int toIndex = Math.min(offset + limit, quotes.size());
+
+                    return quotes.subList(fromIndex, toIndex);
+                });
+    }
+
+    protected static ContractNegotiation getValidNegotiationWithIdOfferAndType(String id, List<ContractOffer> offers, ContractNegotiation.Type type, ContractNegotiationStates state) {
         return ContractNegotiation.Builder
                 .newInstance()
+                .type(type)
+                .state(state.code())
+                .clock(Clock.fixed(Instant.EPOCH, TimeZone.getDefault().toZoneId()))
+                .id(id)
+                .counterPartyAddress(TEST_COUNTER_PARTY_ADDRESS)
+                .counterPartyId(TEST_COUNTER_PARTY_ID)
+                .protocol(TEST_PROTOCOL)
+                .contractOffers(offers)
+                .build();
+    }
+
+    protected static ContractNegotiation getValidNegotiationWithId(String id) {
+        return ContractNegotiation.Builder
+                .newInstance()
+                .clock(Clock.fixed(Instant.EPOCH, TimeZone.getDefault().toZoneId()))
+                .id(id)
+                .counterPartyAddress(TEST_COUNTER_PARTY_ADDRESS)
+                .counterPartyId(TEST_COUNTER_PARTY_ID)
+                .protocol(TEST_PROTOCOL)
+                .build();
+    }
+
+    protected static ContractNegotiation getValidNegotiation() {
+        return ContractNegotiation.Builder
+                .newInstance()
+                .clock(Clock.fixed(Instant.EPOCH, TimeZone.getDefault().toZoneId()))
                 .counterPartyAddress(TEST_COUNTER_PARTY_ADDRESS)
                 .counterPartyId(TEST_COUNTER_PARTY_ID)
                 .protocol(TEST_PROTOCOL)
@@ -212,11 +248,222 @@ public class TMFBackedContractNegotiationStoreTest {
         when(agreementApiClient.getAgreements(anyInt(), anyInt())).thenReturn(getAgreements(10, "agg", AgreementState.AGREED.getValue()).stream().map(AgreementHolder::agreementVO).toList());
         when(tmfEdcMapper.toContractAgreement(any()))
                 .thenThrow(new RuntimeException("Unmappable"))
-                .thenReturn(getTestAgreement());
+                .thenReturn(getTestContractAgreement());
         assertEquals(9, tmfBackedContractNegotiationStore.queryAgreements(QuerySpec.max()).count(), "If an agreement cannot be mapped, it should be ignored.");
     }
 
-    private static Stream<Arguments> getValidAgreements() {
+    @Test
+    public void testFindById_success() {
+        String negotiationId = "negotiation-id";
+        ContractNegotiation negotiation = getValidNegotiation();
+        List<ExtendableQuoteVO> extendableQuoteVOS = getQuotes(negotiationId, TEST_CONTROL_PLANE_ID, 10);
+
+        when(quoteApiClient.findByNegotiationId(eq(negotiationId))).thenReturn(extendableQuoteVOS);
+        when(tmfEdcMapper.toContractNegotiation(eq(extendableQuoteVOS), any(), any(), any())).thenReturn(negotiation);
+        assertEquals(negotiation, tmfBackedContractNegotiationStore.findById(negotiationId), "The correct negotiation should be returned.");
+    }
+
+    @Test
+    public void testFindById_no_negotiation() {
+        when(quoteApiClient.findByNegotiationId(any())).thenReturn(List.of());
+
+        assertNull(tmfBackedContractNegotiationStore.findById("negotiation"), "No negotiation should be returned.");
+    }
+
+    @Test
+    public void testFindById_no_negotiation_for_this_plane() {
+        List<ExtendableQuoteVO> extendableQuoteVOS = getQuotes("negotiation", "other-control-plane", 10);
+
+        when(quoteApiClient.findByNegotiationId(eq("negotiation"))).thenReturn(extendableQuoteVOS);
+        assertNull(tmfBackedContractNegotiationStore.findById("negotiation"), "No negotiation should be returned.");
+    }
+
+    @Test
+    public void testFindById_mapping_error() {
+        List<ExtendableQuoteVO> extendableQuoteVOS = getQuotes("negotiation", TEST_CONTROL_PLANE_ID, 10);
+
+        when(quoteApiClient.findByNegotiationId(any())).thenReturn(extendableQuoteVOS);
+        when(tmfEdcMapper.toContractNegotiation(eq(extendableQuoteVOS), any(), any(), any())).thenThrow(new RuntimeException("Failed to map."));
+        assertThrows(RuntimeException.class, () -> tmfBackedContractNegotiationStore.findById("negotiation"), "The exception should bubble.");
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("getLeasableNegotiations")
+    public void testNextNotLeased_success(String name, List<ExtendableQuoteVO> negotiationQuotes, List<NegotiationLease> negotiationLeases, int max, List<ContractNegotiation> expectedNegotiations) {
+
+        // trigger invocation
+        when(lockManager.writeLock(any())).thenAnswer(invocationOnMock -> {
+                    Supplier<List<ContractNegotiation>> work = invocationOnMock.getArgument(0);
+                    return work.get();
+                }
+        );
+
+        stubQuotes(negotiationQuotes);
+
+        Map<String, NegotiationLease> negMap = new HashMap<>();
+        negotiationLeases.forEach(nl -> {
+            negMap.put(nl.contractNegotiation().getId(), nl);
+            if (nl.acquireError()) {
+                doThrow(new IllegalStateException()).when(leaseHolder).acquireLease(eq(nl.contractNegotiation().getId()), any());
+            }
+        });
+
+        when(leaseHolder.isLeased(any()))
+                .thenAnswer(invocationOnMock -> {
+                    String id = invocationOnMock.getArgument(0);
+                    return negMap.get(id).isLeased();
+                });
+        when(tmfEdcMapper.toContractNegotiation(any(), any(), any(), any()))
+                .thenAnswer(invocationOnMock -> {
+                    List<ExtendableQuoteVO> quotes = invocationOnMock.getArgument(0);
+                    return negMap.get(quotes.getFirst().getExternalId()).contractNegotiation();
+                });
+        List<ContractNegotiation> negotiations = tmfBackedContractNegotiationStore.nextNotLeased(max);
+        // remove the order by putting into a set
+        assertEquals(new HashSet<>(expectedNegotiations), new HashSet<>(negotiations), name);
+    }
+
+    @Test
+    public void testNextNotLeased_fail_to_lock() {
+        when(lockManager.writeLock(any())).thenThrow(new LockException("Was not able to get lock"));
+        assertThrows(EdcPersistenceException.class, () -> tmfBackedContractNegotiationStore.nextNotLeased(3), "And EdcPersistenceException should be thrown if no lock can be acquired.");
+    }
+
+    @Test
+    public void testNextNotLeased_api_failure() {
+        // trigger invocation
+        when(lockManager.writeLock(any())).thenAnswer(invocationOnMock -> {
+                    Supplier<List<ContractNegotiation>> work = invocationOnMock.getArgument(0);
+                    return work.get();
+                }
+        );
+        when(quoteApiClient.getQuotes(anyInt(), anyInt())).thenThrow(new RuntimeException("Something happend."));
+        assertThrows(EdcPersistenceException.class, () -> tmfBackedContractNegotiationStore.nextNotLeased(3), "And EdcPersistenceException should be thrown if an API failure happens.");
+    }
+
+    @Test
+    public void testFindByIdAndLease_success() {
+        // trigger invocation
+        when(lockManager.writeLock(any())).thenAnswer(invocationOnMock -> {
+                    Supplier<List<ContractNegotiation>> work = invocationOnMock.getArgument(0);
+                    return work.get();
+                }
+        );
+        String negotiationId = "negotiation-id";
+        ContractNegotiation negotiation = getValidNegotiation();
+        List<ExtendableQuoteVO> extendableQuoteVOS = getQuotes(negotiationId, TEST_CONTROL_PLANE_ID, 10);
+
+        when(leaseHolder.isLeased(eq(negotiationId))).thenReturn(false);
+        when(quoteApiClient.findByNegotiationId(eq(negotiationId))).thenReturn(extendableQuoteVOS);
+        when(tmfEdcMapper.toContractNegotiation(eq(extendableQuoteVOS), any(), any(), any())).thenReturn(negotiation);
+
+        StoreResult<ContractNegotiation> storeResult = tmfBackedContractNegotiationStore.findByIdAndLease(negotiationId);
+
+        assertTrue(storeResult.succeeded(), "The negotiation should have been leased.");
+        assertEquals(negotiation, storeResult.getContent(), "The correct negotiation should be returned.");
+
+    }
+
+    @Test
+    public void testFindByIdAndLease_already_leased() {
+        // trigger invocation
+        when(lockManager.writeLock(any())).thenAnswer(invocationOnMock -> {
+                    Supplier<List<ContractNegotiation>> work = invocationOnMock.getArgument(0);
+                    return work.get();
+                }
+        );
+        String negotiationId = "negotiation-id";
+        ContractNegotiation negotiation = getValidNegotiation();
+        List<ExtendableQuoteVO> extendableQuoteVOS = getQuotes(negotiationId, TEST_CONTROL_PLANE_ID, 10);
+
+        doThrow(new IllegalStateException()).when(leaseHolder).acquireLease(eq(negotiationId), any());
+        when(quoteApiClient.findByNegotiationId(eq(negotiationId))).thenReturn(extendableQuoteVOS);
+        when(tmfEdcMapper.toContractNegotiation(eq(extendableQuoteVOS), any(), any(), any())).thenReturn(negotiation);
+        StoreResult<ContractNegotiation> storeResult = tmfBackedContractNegotiationStore.findByIdAndLease(negotiationId);
+        assertTrue(storeResult.failed(), "The result should be a failure if the negotiation is already leased.");
+        assertEquals(StoreFailure.Reason.ALREADY_LEASED, storeResult.reason(), "The correct reason should be returned.");
+    }
+
+    @Test
+    public void testFindByIdAndLease_lock_failure() {
+        when(lockManager.writeLock(any())).thenThrow(new RuntimeException("No lock."));
+        StoreResult<ContractNegotiation> storeResult = tmfBackedContractNegotiationStore.findByIdAndLease("negotiationId");
+        assertTrue(storeResult.failed(), "If the lock fails, the result should indicate failure.");
+        assertEquals(StoreFailure.Reason.GENERAL_ERROR, storeResult.reason(), "The correct reason for the failure should be provided.");
+    }
+
+    protected record NegotiationLease(ContractNegotiation contractNegotiation, boolean isLeased, boolean acquireError) {
+        public NegotiationLease(ContractNegotiation contractNegotiation, boolean isLeased) {
+            this(contractNegotiation, isLeased, false);
+        }
+    }
+
+    protected static Stream<Arguments> getLeasableNegotiations() {
+        return Stream.of(
+                Arguments.of("The unleased negotiation should be returned.",
+                        getNegotitations(1),
+                        List.of(new NegotiationLease(getValidNegotiationWithId("neg-0"), false)),
+                        3,
+                        List.of(getValidNegotiationWithId("neg-0"))),
+                Arguments.of("All unleased negotiations should be returned.",
+                        getNegotitations(3),
+                        List.of(
+                                new NegotiationLease(getValidNegotiationWithId("neg-0"), false),
+                                new NegotiationLease(getValidNegotiationWithId("neg-1"), false),
+                                new NegotiationLease(getValidNegotiationWithId("neg-2"), false)
+                        ),
+                        5,
+                        List.of(getValidNegotiationWithId("neg-0"), getValidNegotiationWithId("neg-1"), getValidNegotiationWithId("neg-2"))),
+                Arguments.of("Only unleased negotiations should be returned.",
+                        getNegotitations(3),
+                        List.of(
+                                new NegotiationLease(getValidNegotiationWithId("neg-0"), false),
+                                new NegotiationLease(getValidNegotiationWithId("neg-1"), true),
+                                new NegotiationLease(getValidNegotiationWithId("neg-2"), false)
+                        ),
+                        5,
+                        List.of(getValidNegotiationWithId("neg-0"), getValidNegotiationWithId("neg-2"))),
+                Arguments.of("Only the maximum unleased negotiations should be returned.",
+                        getNegotitations(6),
+                        List.of(
+                                new NegotiationLease(getValidNegotiationWithId("neg-0"), false),
+                                new NegotiationLease(getValidNegotiationWithId("neg-1"), true),
+                                new NegotiationLease(getValidNegotiationWithId("neg-2"), false),
+                                new NegotiationLease(getValidNegotiationWithId("neg-3"), false),
+                                new NegotiationLease(getValidNegotiationWithId("neg-4"), false),
+                                new NegotiationLease(getValidNegotiationWithId("neg-5"), false)
+                        ),
+                        3,
+                        // order is reversed, due to the equal timestamps, thus the last 3 should be returned.
+                        List.of(getValidNegotiationWithId("neg-2"), getValidNegotiationWithId("neg-4"), getValidNegotiationWithId("neg-5"))),
+                Arguments.of("If no unleased negotiations are available, nothing should be returend.",
+                        getNegotitations(6),
+                        List.of(
+                                new NegotiationLease(getValidNegotiationWithId("neg-0"), true),
+                                new NegotiationLease(getValidNegotiationWithId("neg-1"), true),
+                                new NegotiationLease(getValidNegotiationWithId("neg-2"), true),
+                                new NegotiationLease(getValidNegotiationWithId("neg-3"), true),
+                                new NegotiationLease(getValidNegotiationWithId("neg-4"), true),
+                                new NegotiationLease(getValidNegotiationWithId("neg-5"), true)
+                        ),
+                        3,
+                        List.of()),
+                Arguments.of("Negotitation where acquiring the lease fails, should not be returned.",
+                        getNegotitations(6),
+                        List.of(
+                                new NegotiationLease(getValidNegotiationWithId("neg-0"), false),
+                                new NegotiationLease(getValidNegotiationWithId("neg-1"), true),
+                                new NegotiationLease(getValidNegotiationWithId("neg-2"), false),
+                                new NegotiationLease(getValidNegotiationWithId("neg-3"), false),
+                                new NegotiationLease(getValidNegotiationWithId("neg-4"), false),
+                                new NegotiationLease(getValidNegotiationWithId("neg-5"), false, true)
+                        ),
+                        5,
+                        List.of(getValidNegotiationWithId("neg-0"), getValidNegotiationWithId("neg-2"), getValidNegotiationWithId("neg-3"), getValidNegotiationWithId("neg-4")))
+        );
+    }
+
+    protected static Stream<Arguments> getValidAgreements() {
         return Stream.of(
                 Arguments.of("All agreements should have been returned.",
                         getAgreements(10, "agg", AgreementState.AGREED.getValue()),
@@ -233,7 +480,7 @@ public class TMFBackedContractNegotiationStoreTest {
         );
     }
 
-    private static List<AgreementHolder> getAgreements(int numAgs, String idPrefix, String agreementState) {
+    protected static List<AgreementHolder> getAgreements(int numAgs, String idPrefix, String agreementState) {
         List<AgreementHolder> agreementHolders = new ArrayList<>();
         for (int i = 0; i < numAgs; i++) {
             ContractAgreement contractAgreement = ContractAgreement.Builder.newInstance()
@@ -252,7 +499,7 @@ public class TMFBackedContractNegotiationStoreTest {
         return agreementHolders;
     }
 
-    private static Stream<Arguments> getValidNegotiations() {
+    protected static Stream<Arguments> getValidNegotiations() {
         return Stream.of(
                 Arguments.of("Get one negotiation from the quotes.",
                         QuerySpec.Builder.newInstance().offset(0).limit(100).build(),
@@ -285,7 +532,7 @@ public class TMFBackedContractNegotiationStoreTest {
         );
     }
 
-    private static List<ExtendableQuoteVO> getNegotitations(int numNegs) {
+    protected static List<ExtendableQuoteVO> getNegotitations(int numNegs) {
         List<ExtendableQuoteVO> quoteVOS = new ArrayList<>();
         for (int i = 0; i < numNegs; i++) {
             quoteVOS.addAll(getQuotes(String.format("neg-%s", i), TEST_CONTROL_PLANE_ID, 3));
@@ -293,7 +540,7 @@ public class TMFBackedContractNegotiationStoreTest {
         return quoteVOS;
     }
 
-    private static List<ExtendableQuoteVO> getQuotes(String negotiationId, String controlPlane, int numQuotes) {
+    protected static List<ExtendableQuoteVO> getQuotes(String negotiationId, String controlPlane, int numQuotes) {
         List<ExtendableQuoteVO> extendableQuoteVOS = new ArrayList<>();
         for (int i = 0; i < numQuotes; i++) {
             ExtendableQuoteVO extendableQuoteVO = new ExtendableQuoteVO();
@@ -305,13 +552,11 @@ public class TMFBackedContractNegotiationStoreTest {
         return extendableQuoteVOS;
     }
 
-    private record NegotiationHolder(List<ExtendableQuoteVO> extendableQuoteVOS, ContractNegotiation contractNegotiation) {
+
+    protected record AgreementHolder(ExtendableAgreementVO agreementVO, ContractAgreement contractAgreement) {
     }
 
-    private record AgreementHolder(ExtendableAgreementVO agreementVO, ContractAgreement contractAgreement) {
-    }
-
-    private static ContractAgreement getTestAgreement() {
+    protected static ContractAgreement getTestContractAgreement() {
         return ContractAgreement.Builder.newInstance()
                 .id(TEST_AGREEMENT_ID)
                 .providerId(TEST_PROVIDER_ID)
@@ -322,7 +567,7 @@ public class TMFBackedContractNegotiationStoreTest {
     }
 
 
-    private static Policy getTestPolicy() {
+    protected static Policy getTestPolicy() {
         return Policy.Builder
                 .newInstance()
                 .extensibleProperty("http://www.w3.org/ns/odrl/2/uid", TEST_POLICY_ID)

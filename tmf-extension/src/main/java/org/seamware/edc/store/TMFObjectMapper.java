@@ -23,7 +23,7 @@ public interface TMFObjectMapper {
 
     ExtendableUsageCreateVO mapToCreate(ExtendableUsageVO extendableUsageVO);
 
-    default ContractNegotiationStates mapNegotiationState(String state) {
+    static ContractNegotiationStates mapNegotiationState(String state) {
         return switch (state) {
             case "INITIAL" -> ContractNegotiationStates.INITIAL;
             case "REQUESTING" -> ContractNegotiationStates.REQUESTING;

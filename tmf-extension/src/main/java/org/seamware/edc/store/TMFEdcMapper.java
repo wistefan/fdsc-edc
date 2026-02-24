@@ -293,11 +293,11 @@ public class TMFEdcMapper {
         return quoteVOs.getLast();
     }
 
-    public ContractNegotiationStates toState(String state) {
-        return tmfObjectMapper.mapNegotiationState(state);
+    public static ContractNegotiationStates toState(String state) {
+        return TMFObjectMapper.mapNegotiationState(state);
     }
 
-    public ContractNegotiationStates getContractNegotiationState(ExtendableQuoteVO quoteVO) {
+    public static ContractNegotiationStates getContractNegotiationState(ExtendableQuoteVO quoteVO) {
         String state = Optional.ofNullable(quoteVO.getContractNegotiationState())
                 .map(ContractNegotiationState::getState)
                 .orElseThrow(() -> new IllegalArgumentException("The quote does not contain a negotiation state."));
@@ -335,7 +335,6 @@ public class TMFEdcMapper {
 
         ContractOfferIdParser.ContractOfferWithUid contractOfferId = ContractOfferIdParser.parseId(contractOffer.getId())
                 .orElseThrow(f -> new IllegalArgumentException(f.getFailureDetail() + " id was " + contractOffer.getId()));
-
 
         ExtendableQuoteItemVO extendableQuoteItemVO = new ExtendableQuoteItemVO();
         extendableQuoteItemVO.setId(contractOfferId.uuid());

@@ -217,7 +217,7 @@ public class TMFContractNegotiationExtension implements ServiceExtension {
             String controlplane = serviceExtensionContext.getConfig().getString("edc.hostname");
             contractNegotiationStore = new TMFBackedContractNegotiationStore(monitor, objectMapper(), quoteApi(tmfConfig), agreementApi(tmfConfig),
                     productOrderApi(tmfConfig), productCatalogApi(tmfConfig), productInventoryApi(tmfConfig), participantResolver(tmfConfig),
-                    tmfEdcMapper(tmfConfig), serviceExtensionContext.getParticipantId(), clock, controlplane, criterionOperatorRegistry);
+                    tmfEdcMapper(tmfConfig), serviceExtensionContext.getParticipantId(), controlplane, criterionOperatorRegistry, new HashMapLeaseHolder(monitor, clock));
         }
         return contractNegotiationStore;
     }

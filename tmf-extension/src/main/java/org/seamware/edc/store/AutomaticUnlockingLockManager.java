@@ -1,4 +1,4 @@
-package org.seamware.edc;
+package org.seamware.edc.store;
 
 import org.eclipse.edc.spi.monitor.Monitor;
 import org.eclipse.edc.util.concurrency.LockException;
@@ -10,7 +10,7 @@ import java.util.function.Supplier;
 /**
  * Implementation of the lock manager, that unlocks after a given timeout to resolve potential deadlocks
  */
-public class AutomaticUnlockingLockManager {
+public class AutomaticUnlockingLockManager implements LockManager {
 
     private static final int DEFAULT_TIMEOUT = 1000;
 

@@ -2,7 +2,6 @@ package org.seamware.edc.store;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import org.eclipse.edc.connector.controlplane.asset.spi.domain.Asset;
 import org.eclipse.edc.connector.controlplane.contract.spi.ContractOfferId;
 import org.eclipse.edc.connector.controlplane.contract.spi.negotiation.store.ContractNegotiationStore;
 import org.eclipse.edc.connector.controlplane.contract.spi.types.agreement.ContractAgreement;
@@ -12,19 +11,16 @@ import org.eclipse.edc.connector.controlplane.contract.spi.types.offer.ContractO
 import org.eclipse.edc.spi.entity.StatefulEntity;
 import org.eclipse.edc.spi.monitor.Monitor;
 import org.eclipse.edc.spi.persistence.EdcPersistenceException;
-import org.eclipse.edc.spi.persistence.Lease;
 import org.eclipse.edc.spi.query.Criterion;
 import org.eclipse.edc.spi.query.CriterionOperatorRegistry;
 import org.eclipse.edc.spi.query.QuerySpec;
 import org.eclipse.edc.spi.result.StoreResult;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
-import org.seamware.edc.AutomaticUnlockingLockManager;
 import org.seamware.edc.domain.*;
 import org.seamware.edc.tmf.*;
 import org.seamware.tmforum.agreement.model.AgreementItemVO;
 import org.seamware.tmforum.agreement.model.AgreementTermOrConditionVO;
-import org.seamware.tmforum.agreement.model.AgreementVO;
 import org.seamware.tmforum.agreement.model.ProductRefVO;
 import org.seamware.tmforum.productinventory.model.ProductOfferingRefVO;
 import org.seamware.tmforum.productinventory.model.ProductStatusTypeVO;
@@ -34,8 +30,6 @@ import org.seamware.tmforum.quote.model.QuoteStateTypeVO;
 import org.seamware.tmforum.quote.model.QuoteVO;
 import org.seamware.tmforum.quote.model.RelatedPartyVO;
 
-import java.time.Clock;
-import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.Predicate;
@@ -48,8 +42,6 @@ import static org.seamware.edc.tmf.ParticipantResolver.PROVIDER_ROLE;
 
 public class TMFBackedContractNegotiationStore implements ContractNegotiationStore {
 
-    private static final Duration DEFAULT_LEASE_TIME = Duration.ofSeconds(60);
-
     private final Monitor monitor;
     private final ObjectMapper objectMapper;
     private final QuoteApiClient quoteApi;
@@ -58,7 +50,6 @@ public class TMFBackedContractNegotiationStore implements ContractNegotiationSto
     private final ProductCatalogApiClient productCatalogApi;
     private final ProductInventoryApiClient productInventoryApi;
     private final ParticipantResolver participantResolver;
-    private final Clock clock;
     private final TMFEdcMapper tmfEdcMapper;
     private final String participantId;
     private final String controlplane;
@@ -66,14 +57,28 @@ public class TMFBackedContractNegotiationStore implements ContractNegotiationSto
     private final CriterionOperatorRegistry criterionOperatorRegistry;
 
     private final String lockId;
-    private final AutomaticUnlockingLockManager lockManager;
-    private final Map<String, Lease> leases = new HashMap<>();
+    private final LockManager lockManager;
+    private final LeaseHolder leaseHolder;
 
     public TMFBackedContractNegotiationStore(Monitor monitor, ObjectMapper objectMapper, QuoteApiClient quoteApi,
                                              AgreementApiClient agreementApi, ProductOrderApiClient productOrderApi,
                                              ProductCatalogApiClient productCatalogApi, ProductInventoryApiClient productInventoryApi,
                                              ParticipantResolver participantResolver, TMFEdcMapper tmfEdcMapper, String participantId,
-                                             Clock clock, String controlplane, CriterionOperatorRegistry criterionOperatorRegistry) {
+                                             String controlplane, CriterionOperatorRegistry criterionOperatorRegistry, LeaseHolder leaseHolder) {
+        this(monitor, objectMapper,
+                quoteApi, agreementApi,
+                productOrderApi, productCatalogApi,
+                productInventoryApi, participantResolver,
+                tmfEdcMapper, participantId,
+                controlplane, criterionOperatorRegistry,
+                leaseHolder, new AutomaticUnlockingLockManager(new ReentrantReadWriteLock(true), 10500, monitor));
+    }
+
+    public TMFBackedContractNegotiationStore(Monitor monitor, ObjectMapper objectMapper, QuoteApiClient quoteApi,
+                                             AgreementApiClient agreementApi, ProductOrderApiClient productOrderApi,
+                                             ProductCatalogApiClient productCatalogApi, ProductInventoryApiClient productInventoryApi,
+                                             ParticipantResolver participantResolver, TMFEdcMapper tmfEdcMapper, String participantId,
+                                             String controlplane, CriterionOperatorRegistry criterionOperatorRegistry, LeaseHolder leaseHolder, LockManager lockManager) {
         this.monitor = monitor;
         this.objectMapper = objectMapper;
         this.quoteApi = quoteApi;
@@ -84,11 +89,11 @@ public class TMFBackedContractNegotiationStore implements ContractNegotiationSto
         this.participantResolver = participantResolver;
         this.tmfEdcMapper = tmfEdcMapper;
         this.participantId = participantId;
-        this.clock = clock;
+        this.leaseHolder = leaseHolder;
         this.controlplane = controlplane;
         this.criterionOperatorRegistry = criterionOperatorRegistry;
         this.lockId = UUID.randomUUID().toString();
-        this.lockManager = new AutomaticUnlockingLockManager(new ReentrantReadWriteLock(true), 10500, monitor);
+        this.lockManager = lockManager;
     }
 
     @Override
@@ -173,6 +178,9 @@ public class TMFBackedContractNegotiationStore implements ContractNegotiationSto
                 // only those that this controlplane is responsible for
                 .filter(eqv -> eqv.getContractNegotiationState().getControlplane().equals(controlplane))
                 .toList();
+        if (contractNegotiations == null || contractNegotiations.isEmpty()) {
+            return null;
+        }
         return tmfEdcMapper.toContractNegotiation(new ArrayList<>(contractNegotiations), agreementApi, participantResolver, participantId);
     }
 
@@ -226,10 +234,10 @@ public class TMFBackedContractNegotiationStore implements ContractNegotiationSto
         try {
             return lockManager.writeLock(() -> getNegotiations(Arrays.asList(criteria))
                     .stream()
-                    .filter(e -> !isLeased(e.getId()))
+                    .filter(e -> !leaseHolder.isLeased(e.getId()))
                     .filter(cn -> {
                         try {
-                            acquireLease(cn.getId());
+                            leaseHolder.acquireLease(cn.getId(), lockId);
                             return true;
                         } catch (Exception e) {
                             monitor.info(String.format("Was not able to lease %s", cn.getId()), e);
@@ -254,7 +262,7 @@ public class TMFBackedContractNegotiationStore implements ContractNegotiationSto
                     return StoreResult.notFound(String.format("Negotiation %s does not exist.", s));
                 }
                 try {
-                    acquireLease(s);
+                    leaseHolder.acquireLease(s, lockId);
                     return StoreResult.success(contractNegotiation);
                 } catch (IllegalStateException e) {
                     return StoreResult.alreadyLeased(String.format("%s is already leased.", s));
@@ -262,153 +270,161 @@ public class TMFBackedContractNegotiationStore implements ContractNegotiationSto
             });
         } catch (Exception e) {
             monitor.warning("Failed to find", e);
-            throw new EdcPersistenceException(e);
+            return StoreResult.generalError(e.getMessage());
         }
     }
 
     @Override
     public void save(ContractNegotiation contractNegotiation) {
-        persistContractNegotiation(contractNegotiation);
-    }
-
-    private void persistContractNegotiation(ContractNegotiation contractNegotiation) {
-        monitor.severe("save " + ContractNegotiationStates.from(contractNegotiation.getState()).name() + " pending " + contractNegotiation.isPending() + " " + contractNegotiation.getType() + " id " + contractNegotiation);
         try {
-            acquireLease(contractNegotiation.getId());
+            leaseHolder.acquireLease(contractNegotiation.getId(), lockId);
             ContractNegotiationStates negotiationState = ContractNegotiationStates.from(contractNegotiation.getState());
             switch (negotiationState) {
-                case INITIAL, REQUESTING -> {
-
-                    List<ExtendableQuoteVO> quotes = getQuotes(contractNegotiation);
-                    Optional<ExtendableQuoteVO> activeQuote = getActiveQuote(quotes, contractNegotiation, List.of(ContractNegotiationStates.INITIAL, ContractNegotiationStates.REQUESTING));
-                    if (activeQuote.isEmpty()) {
-                        // in case of counter-offers, we will have a quote in approved or accepted and need to cancel them
-                        getActiveQuote(quotes, contractNegotiation, List.of(ContractNegotiationStates.OFFERING, ContractNegotiationStates.OFFERED))
-                                .ifPresent(q -> terminateQuote(q, contractNegotiation, QuoteStateTypeVO.CANCELLED));
-                        // create the new quote
-                        createQuote(contractNegotiation, QuoteStateTypeVO.IN_PROGRESS);
-                    } else {
-                        updateQuote(activeQuote.get(), contractNegotiation, QuoteStateTypeVO.IN_PROGRESS);
-                    }
-                }
-                case REQUESTED -> {
-                    List<ExtendableQuoteVO> quotes = getQuotes(contractNegotiation);
-                    Optional<ExtendableQuoteVO> activeQuote = getActiveQuote(quotes, contractNegotiation, List.of(ContractNegotiationStates.INITIAL, ContractNegotiationStates.OFFERED, ContractNegotiationStates.REQUESTED, ContractNegotiationStates.REQUESTING));
-                    if (activeQuote.isEmpty()) {
-                        monitor.info("Create quote in requested - existing quotes " + objectMapper.writeValueAsString(quotes));
-                        // in case of counter-offers, we will have a quote in approved or accepted and need to cancel them
-                        getActiveQuote(quotes, contractNegotiation, List.of(ContractNegotiationStates.OFFERED))
-                                .ifPresent(q -> terminateQuote(q, contractNegotiation, QuoteStateTypeVO.CANCELLED));
-                        ExtendableQuoteVO quoteVO = createQuote(contractNegotiation, QuoteStateTypeVO.IN_PROGRESS);
-                        // we need to create and update, since state changes are only able by patch
-                        updateQuote(quoteVO, contractNegotiation, QuoteStateTypeVO.APPROVED);
-                    } else {
-                        updateQuote(activeQuote.get(), contractNegotiation, QuoteStateTypeVO.APPROVED);
-                    }
-                }
-                case OFFERING, OFFERED -> {
-                    Optional<ExtendableQuoteVO> activeQuote = getActiveQuote(getQuotes(contractNegotiation), contractNegotiation, List.of(ContractNegotiationStates.REQUESTED, ContractNegotiationStates.INITIAL, ContractNegotiationStates.OFFERING, ContractNegotiationStates.OFFERED));
-                    if (activeQuote.isEmpty()) {
-                        monitor.info("Create quote in offered");
-                        ExtendableQuoteVO quoteVO = createQuote(contractNegotiation, QuoteStateTypeVO.APPROVED);
-                        // we need to create and update, since state changes are only able by patch
-                        updateQuote(quoteVO, contractNegotiation, QuoteStateTypeVO.APPROVED);
-                    } else {
-                        updateQuote(activeQuote.get(), contractNegotiation, QuoteStateTypeVO.APPROVED);
-                    }
-                }
-                case ACCEPTED, ACCEPTING -> {
-                    List<ExtendableQuoteVO> quotes = getQuotes(contractNegotiation);
-                    Optional<ExtendableQuoteVO> activeQuote = getActiveQuote(quotes, contractNegotiation, List.of(ContractNegotiationStates.OFFERED, ContractNegotiationStates.ACCEPTING, ContractNegotiationStates.ACCEPTED));
-                    Optional<ExtendableQuoteVO> terminatingQuote = quotes.stream().filter(q -> tmfEdcMapper.getContractNegotiationState(q) == ContractNegotiationStates.TERMINATING).findAny();
-                    if (activeQuote.isEmpty() && terminatingQuote.isEmpty()) {
-                        monitor.info("Create quote in accepted - existing quotes " + objectMapper.writeValueAsString(quotes));
-                        // if the first offer is directly accepted, no quote might exist
-                        ExtendableQuoteVO quoteVO = createQuote(contractNegotiation, QuoteStateTypeVO.ACCEPTED);
-                        // we need to create and update, since state changes are only able by patch
-                        updateQuote(quoteVO, contractNegotiation, QuoteStateTypeVO.ACCEPTED);
-                    } else if (activeQuote.isPresent()) {
-                        updateQuote(activeQuote.get(), contractNegotiation, QuoteStateTypeVO.ACCEPTED);
-                    } else {
-                        // negotiation is currently in terminating, dont do anything.
-                    }
-                }
-                case AGREEING, AGREED -> {
-                    Optional<ExtendableQuoteVO> activeQuote = getActiveQuote(getQuotes(contractNegotiation), contractNegotiation, List.of(ContractNegotiationStates.AGREEING, ContractNegotiationStates.AGREED, ContractNegotiationStates.ACCEPTED, ContractNegotiationStates.REQUESTED));
-                    if (activeQuote.isEmpty()) {
-                        // we cannot throw something here, since it somehow kills an internal edc worker...
-                        monitor.warning(String.format("Cannot save transition to %s for %s.", negotiationState.name(), contractNegotiation.getId()));
-                    } else {
-                        updateQuote(activeQuote.get(), contractNegotiation, QuoteStateTypeVO.ACCEPTED);
-                        if (contractNegotiation.getContractAgreement() != null) {
-                            createAgreement(contractNegotiation);
-                        }
-                    }
-                }
-                case VERIFIED, VERIFYING -> {
-
-                    Optional<ExtendableQuoteVO> extendableQuoteVO = getActiveQuote(getQuotes(contractNegotiation), contractNegotiation, List.of(ContractNegotiationStates.AGREED, ContractNegotiationStates.VERIFYING, ContractNegotiationStates.VERIFIED));
-
-                    if (extendableQuoteVO.isEmpty()) {
-                        throw new IllegalArgumentException("In state verified, an accepted Quote needs to exist.");
-                    }
-
-                    ExtendableQuoteVO quoteVO = extendableQuoteVO.get();
-                    if (getProductOrder(quoteVO.getId()).isPresent()) {
-                        monitor.info("The order is already created.");
-                        // update the quote anyway to reflect the current state.
-                        updateQuote(quoteVO, contractNegotiation, quoteVO.getState());
-                        return;
-                    }
-
-                    ProductOrderCreateVO productOrderCreateVO = new ProductOrderCreateVO();
-                    getFromNegotiation(contractNegotiation)
-                            .stream()
-                            .map(p -> new org.seamware.tmforum.productorder.model.RelatedPartyVO().id(p.partyId()).role(p.role()))
-                            .forEach(pr -> {
-                                if (pr.getRole().equals(CONSUMER_ROLE)) {
-                                    productOrderCreateVO.addRelatedPartyItem(pr);
-                                    // Customer is the role expected by the Contract-Management
-                                    productOrderCreateVO.addRelatedPartyItem(new org.seamware.tmforum.productorder.model.RelatedPartyVO().id(pr.getId()).role("Customer"));
-                                } else {
-                                    productOrderCreateVO.addRelatedPartyItem(pr);
-                                }
-                            });
-                    productOrderCreateVO.quote(List.of(new QuoteRefVO().id(quoteVO.getId())));
-
-                    productOrderApi.createProductOrder(productOrderCreateVO);
-                    updateQuote(quoteVO, contractNegotiation, quoteVO.getState());
-                }
-                case FINALIZING, FINALIZED -> {
-                    Optional<ExtendableQuoteVO> extendableQuoteVO = getActiveQuote(getQuotes(contractNegotiation), contractNegotiation, List.of(ContractNegotiationStates.VERIFIED, ContractNegotiationStates.FINALIZING, ContractNegotiationStates.FINALIZED));
-
-                    if (extendableQuoteVO.isEmpty()) {
-                        throw new IllegalArgumentException("In state verified, an accepted Quote needs to exist.");
-                    }
-                    finalizeOrder(contractNegotiation, extendableQuoteVO.get());
-
-                }
-                case TERMINATED, TERMINATING -> {
-                    quoteApi.findByNegotiationId(contractNegotiation.getId())
-                            .forEach(cn -> {
-                                updateQuote(cn, contractNegotiation, QuoteStateTypeVO.CANCELLED);
-                                cancelProductOrder(cn);
-                            });
-                    // TODO: check to reject product order
-                }
-                default -> monitor.warning("State not yet supported " + negotiationState);
+                case INITIAL, REQUESTING -> handleInitialStates(contractNegotiation);
+                case REQUESTED -> handleRequestedState(contractNegotiation);
+                case OFFERING, OFFERED -> handleOfferStates(contractNegotiation);
+                case ACCEPTED, ACCEPTING -> handleAcceptStates(contractNegotiation);
+                case AGREEING, AGREED -> handleAgreeStates(contractNegotiation, negotiationState);
+                case VERIFIED, VERIFYING -> handleVerificationStates(contractNegotiation);
+                case FINALIZING, FINALIZED -> handleFinalStates(contractNegotiation);
+                case TERMINATED, TERMINATING -> handleTerminationStates(contractNegotiation);
+                default -> monitor.warning(String.format("State not supported: %s", negotiationState));
             }
         } catch (Exception e) {
-            monitor.warning("Failed to save", e);
+            monitor.warning(String.format("Failed to save negotiation %s.", contractNegotiation.getId()), e);
             throw new EdcPersistenceException(String.format("Failed to save negotiation %s.", contractNegotiation.getId()), e);
         } finally {
             // always give up the lock
-            freeLease(contractNegotiation.getId(), "Finally saved.");
+            leaseHolder.freeLease(contractNegotiation.getId(), "Finally saved.");
+        }
+    }
+
+    private void handleTerminationStates(ContractNegotiation contractNegotiation) {
+        quoteApi.findByNegotiationId(contractNegotiation.getId())
+                .forEach(cn -> {
+                    updateQuote(cn, contractNegotiation, QuoteStateTypeVO.CANCELLED);
+                    cancelProductOrder(cn);
+                });
+    }
+
+    private void handleFinalStates(ContractNegotiation contractNegotiation) {
+        Optional<ExtendableQuoteVO> extendableQuoteVO = getActiveQuote(getQuotes(contractNegotiation), contractNegotiation, List.of(ContractNegotiationStates.VERIFIED, ContractNegotiationStates.FINALIZING, ContractNegotiationStates.FINALIZED));
+
+        if (extendableQuoteVO.isEmpty()) {
+            throw new IllegalArgumentException("In state verified, an accepted Quote needs to exist.");
+        }
+        finalizeOrder(contractNegotiation, extendableQuoteVO.get());
+    }
+
+    private void handleVerificationStates(ContractNegotiation contractNegotiation) {
+        Optional<ExtendableQuoteVO> extendableQuoteVO = getActiveQuote(getQuotes(contractNegotiation), contractNegotiation, List.of(ContractNegotiationStates.AGREED, ContractNegotiationStates.VERIFYING, ContractNegotiationStates.VERIFIED));
+
+        if (extendableQuoteVO.isEmpty()) {
+            throw new IllegalArgumentException("In state verified, an accepted Quote needs to exist.");
+        }
+
+        ExtendableQuoteVO quoteVO = extendableQuoteVO.get();
+        if (getProductOrder(quoteVO.getId()).isPresent()) {
+            monitor.info("The order is already created.");
+            // update the quote anyway to reflect the current state.
+            updateQuote(quoteVO, contractNegotiation, quoteVO.getState());
+            return;
+        }
+
+        ProductOrderCreateVO productOrderCreateVO = new ProductOrderCreateVO();
+        getFromNegotiation(contractNegotiation)
+                .stream()
+                .map(p -> new org.seamware.tmforum.productorder.model.RelatedPartyVO().id(p.partyId()).role(p.role()))
+                .forEach(pr -> {
+                    if (pr.getRole().equals(CONSUMER_ROLE)) {
+                        productOrderCreateVO.addRelatedPartyItem(pr);
+                        // Customer is the role expected by the Contract-Management
+                        productOrderCreateVO.addRelatedPartyItem(new org.seamware.tmforum.productorder.model.RelatedPartyVO().id(pr.getId()).role("Customer"));
+                    } else {
+                        productOrderCreateVO.addRelatedPartyItem(pr);
+                    }
+                });
+        productOrderCreateVO.quote(List.of(new QuoteRefVO().id(quoteVO.getId())));
+
+        productOrderApi.createProductOrder(productOrderCreateVO);
+        updateQuote(quoteVO, contractNegotiation, quoteVO.getState());
+    }
+
+    private void handleAgreeStates(ContractNegotiation contractNegotiation, ContractNegotiationStates negotiationState) {
+        Optional<ExtendableQuoteVO> activeQuote = getActiveQuote(getQuotes(contractNegotiation), contractNegotiation, List.of(ContractNegotiationStates.AGREEING, ContractNegotiationStates.AGREED, ContractNegotiationStates.ACCEPTED, ContractNegotiationStates.REQUESTED));
+        if (activeQuote.isEmpty()) {
+            // we cannot throw something here, since it somehow kills an internal edc worker...
+            monitor.warning(String.format("Cannot save transition to %s for %s.", negotiationState.name(), contractNegotiation.getId()));
+        } else {
+            updateQuote(activeQuote.get(), contractNegotiation, QuoteStateTypeVO.ACCEPTED);
+            if (contractNegotiation.getContractAgreement() != null) {
+                createAgreement(contractNegotiation);
+            }
+        }
+    }
+
+    private void handleAcceptStates(ContractNegotiation contractNegotiation) throws JsonProcessingException {
+        List<ExtendableQuoteVO> quotes = getQuotes(contractNegotiation);
+        Optional<ExtendableQuoteVO> activeQuote = getActiveQuote(quotes, contractNegotiation, List.of(ContractNegotiationStates.OFFERED, ContractNegotiationStates.ACCEPTING, ContractNegotiationStates.ACCEPTED));
+        Optional<ExtendableQuoteVO> terminatingQuote = quotes.stream().filter(q -> TMFEdcMapper.getContractNegotiationState(q) == ContractNegotiationStates.TERMINATING).findAny();
+        if (activeQuote.isEmpty() && terminatingQuote.isEmpty()) {
+            monitor.debug("Create quote in accepted - existing quotes " + objectMapper.writeValueAsString(quotes));
+            // if the first offer is directly accepted, no quote might exist
+            ExtendableQuoteVO quoteVO = createQuote(contractNegotiation, QuoteStateTypeVO.ACCEPTED);
+            // we need to create and update, since state changes are only able by patch
+            updateQuote(quoteVO, contractNegotiation, QuoteStateTypeVO.ACCEPTED);
+        } else if (activeQuote.isPresent()) {
+            updateQuote(activeQuote.get(), contractNegotiation, QuoteStateTypeVO.ACCEPTED);
+        } else {
+            // negotiation is currently in terminating, don't do anything.
+        }
+    }
+
+    private void handleOfferStates(ContractNegotiation contractNegotiation) {
+        Optional<ExtendableQuoteVO> activeQuote = getActiveQuote(getQuotes(contractNegotiation), contractNegotiation, List.of(ContractNegotiationStates.REQUESTED, ContractNegotiationStates.INITIAL, ContractNegotiationStates.OFFERING, ContractNegotiationStates.OFFERED));
+        if (activeQuote.isEmpty()) {
+            monitor.info("Create quote in offered");
+            ExtendableQuoteVO quoteVO = createQuote(contractNegotiation, QuoteStateTypeVO.APPROVED);
+            // we need to create and update, since state changes are only able by patch
+            updateQuote(quoteVO, contractNegotiation, QuoteStateTypeVO.APPROVED);
+        } else {
+            updateQuote(activeQuote.get(), contractNegotiation, QuoteStateTypeVO.APPROVED);
+        }
+    }
+
+    private void handleRequestedState(ContractNegotiation contractNegotiation) throws JsonProcessingException {
+        List<ExtendableQuoteVO> quotes = getQuotes(contractNegotiation);
+        // TODO: check why requested was part of the active states
+        Optional<ExtendableQuoteVO> activeQuote = getActiveQuote(quotes, contractNegotiation, List.of(ContractNegotiationStates.INITIAL, ContractNegotiationStates.REQUESTING));
+        if (activeQuote.isEmpty()) {
+            monitor.debug("Create quote in requested - existing quotes " + objectMapper.writeValueAsString(quotes));
+            // in case of counter-offers, we will have a quote in approved or accepted and need to cancel them
+            getActiveQuote(quotes, contractNegotiation, List.of(ContractNegotiationStates.OFFERED))
+                    .ifPresent(q -> terminateQuote(q, contractNegotiation, QuoteStateTypeVO.CANCELLED));
+            ExtendableQuoteVO quoteVO = createQuote(contractNegotiation, QuoteStateTypeVO.IN_PROGRESS);
+            // we need to create and update, since state changes are only able by patch
+            updateQuote(quoteVO, contractNegotiation, QuoteStateTypeVO.APPROVED);
+        } else {
+            updateQuote(activeQuote.get(), contractNegotiation, QuoteStateTypeVO.APPROVED);
+        }
+    }
+
+    private void handleInitialStates(ContractNegotiation contractNegotiation) {
+        List<ExtendableQuoteVO> quotes = getQuotes(contractNegotiation);
+        Optional<ExtendableQuoteVO> activeQuote = getActiveQuote(quotes, contractNegotiation, List.of(ContractNegotiationStates.INITIAL, ContractNegotiationStates.REQUESTING));
+        if (activeQuote.isEmpty()) {
+            // in case of counter-offers, we will have a quote in approved or accepted and need to cancel them
+            getActiveQuote(quotes, contractNegotiation, List.of(ContractNegotiationStates.OFFERING, ContractNegotiationStates.OFFERED))
+                    .ifPresent(q -> terminateQuote(q, contractNegotiation, QuoteStateTypeVO.CANCELLED));
+            // create the new quote
+            createQuote(contractNegotiation, QuoteStateTypeVO.IN_PROGRESS);
+        } else {
+            updateQuote(activeQuote.get(), contractNegotiation, QuoteStateTypeVO.IN_PROGRESS);
         }
     }
 
 
-    public void finalizeOrder(ContractNegotiation contractNegotiation, ExtendableQuoteVO finalQuote) {
+    private void finalizeOrder(ContractNegotiation contractNegotiation, ExtendableQuoteVO finalQuote) {
         try {
             monitor.warning("FINALIZING Negotiation " + objectMapper.writeValueAsString(contractNegotiation));
         } catch (JsonProcessingException e) {
@@ -479,16 +495,16 @@ public class TMFBackedContractNegotiationStore implements ContractNegotiationSto
     }
 
     private Optional<ExtendableQuoteVO> getActiveQuote(List<ExtendableQuoteVO> quotes, ContractNegotiation contractNegotiation, List<ContractNegotiationStates> possibleStates) {
-        monitor.info("Find active quotes for " + contractNegotiation.getId() + " and states " + possibleStates.stream().map(ContractNegotiationStates::name).collect(Collectors.joining(",")));
+        monitor.debug("Find active quotes for " + contractNegotiation.getId() + " and states " + possibleStates.stream().map(ContractNegotiationStates::name).collect(Collectors.joining(",")));
         List<ExtendableQuoteVO> activeQuoteVOS = quotes
                 .stream()
-                .filter(quoteVO -> possibleStates.contains(tmfEdcMapper.getContractNegotiationState(quoteVO)))
+                .filter(quoteVO -> possibleStates.contains(TMFEdcMapper.getContractNegotiationState(quoteVO)))
                 .toList();
         if (activeQuoteVOS.size() > 1) {
             try {
                 monitor.warning("Multiple active quotes: " + objectMapper.writeValueAsString(activeQuoteVOS));
             } catch (JsonProcessingException e) {
-                throw new RuntimeException(e);
+                throw new EdcPersistenceException(e);
             }
             throw new IllegalArgumentException("There cannot be more than one active quote per negotiation. Negotiation id was " + contractNegotiation.getId());
         }
@@ -586,7 +602,7 @@ public class TMFBackedContractNegotiationStore implements ContractNegotiationSto
     }
 
     private ExtendableQuoteVO createQuote(ContractNegotiation contractNegotiation, QuoteStateTypeVO quoteState) {
-        monitor.warning("Create a quote for negotiation");
+        monitor.debug("Create a quote for negotiation");
 
         ExtendableQuoteCreateVO quoteCreateVO = new ExtendableQuoteCreateVO();
 
@@ -600,10 +616,12 @@ public class TMFBackedContractNegotiationStore implements ContractNegotiationSto
         List<ExtendableQuoteItemVO> extendableQuoteItemVOS =
                 switch (contractNegotiation.getType()) {
                     case PROVIDER -> contractNegotiation.getContractOffers()
-                            .stream().map(co -> tmfEdcMapper.fromProviderContractOffer(co, quoteState.getValue(), getTmfOfferId(co)))
+                            .stream()
+                            .map(co -> tmfEdcMapper.fromProviderContractOffer(co, quoteState.getValue(), getTmfOfferId(co)))
                             .toList();
                     case CONSUMER -> contractNegotiation.getContractOffers()
-                            .stream().map(co -> tmfEdcMapper.fromConsumerContractOffer(co, quoteState.getValue()))
+                            .stream()
+                            .map(co -> tmfEdcMapper.fromConsumerContractOffer(co, quoteState.getValue()))
                             .toList();
                 };
 
@@ -613,11 +631,6 @@ public class TMFBackedContractNegotiationStore implements ContractNegotiationSto
                 .stream()
                 .map(p -> new RelatedPartyVO().id(p.partyId()).role(p.role()))
                 .forEach(quoteCreateVO::addRelatedPartyItem);
-        try {
-            monitor.warning("Create quote " + objectMapper.writeValueAsString(quoteCreateVO));
-        } catch (JsonProcessingException e) {
-            throw new RuntimeException(e);
-        }
 
         return quoteApi.createQuote(quoteCreateVO);
     }
@@ -641,37 +654,6 @@ public class TMFBackedContractNegotiationStore implements ContractNegotiationSto
         };
     }
 
-    public void acquireLease(String id, String lockId, Duration leaseTime) {
-        if (!isLeased(id) || isLeasedBy(id, lockId)) {
-            monitor.info("Acquire lease " + id + " - " + lockId);
-            leases.put(id, new Lease(lockId, clock.millis(), leaseTime.toMillis()));
-        } else {
-            throw new IllegalStateException("Cannot acquire lease, is already leased by someone else!");
-        }
-    }
-
-    public boolean isLeasedBy(String id, String lockId) {
-        synchronized (leases) {
-            return isLeased(id) && leases.get(id).getLeasedBy().equals(lockId);
-        }
-    }
-
-    private void freeLease(String id, String reason) {
-        synchronized (leases) {
-            monitor.info("Free lease " + id + " because " + reason);
-            leases.remove(id);
-        }
-    }
-
-    private void acquireLease(String id) {
-        acquireLease(id, lockId, DEFAULT_LEASE_TIME);
-    }
-
-    private boolean isLeased(String id) {
-        synchronized (leases) {
-            return leases.containsKey(id) && !leases.get(id).isExpired(clock.millis());
-        }
-    }
 
     private record PartyWithRole(String partyId, String role) {
     }

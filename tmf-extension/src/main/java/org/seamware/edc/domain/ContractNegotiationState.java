@@ -1,5 +1,7 @@
 package org.seamware.edc.domain;
 
+import java.util.Objects;
+
 public class ContractNegotiationState {
 
     private boolean isPending;
@@ -61,5 +63,18 @@ public class ContractNegotiationState {
     public ContractNegotiationState setCounterPartyAddress(String counterPartyAddress) {
         this.counterPartyAddress = counterPartyAddress;
         return this;
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+        ContractNegotiationState that = (ContractNegotiationState) o;
+        return isPending == that.isPending && isLeased == that.isLeased && Objects.equals(controlplane, that.controlplane) && Objects.equals(state, that.state) && Objects.equals(correlationId, that.correlationId) && Objects.equals(counterPartyAddress, that.counterPartyAddress);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(isPending, isLeased, controlplane, state, correlationId, counterPartyAddress);
     }
 }
