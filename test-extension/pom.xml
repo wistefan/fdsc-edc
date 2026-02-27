@@ -142,8 +142,7 @@
         <version.org.openapitools.generator-maven-plugin>7.10.0</version.org.openapitools.generator-maven-plugin>
         <version.org.codehaus.mojo.build-helper-maven-plugin>3.4.0</version.org.codehaus.mojo.build-helper-maven-plugin>
 
-        <baseAddress>/home/stefanw/git/fiware/tmforum-api/api/tm-forum/</baseAddress>
-        <!--        <baseAddress>https://raw.githubusercontent.com/FIWARE/tmforum-api/refs/heads/main/api/tm-forum/</baseAddress>-->
+        <baseAddress>https://raw.githubusercontent.com/FIWARE/tmforum-api/refs/heads/main/api/tm-forum/</baseAddress>
 
         <tmforum.productcatalog.api.url>
             ${baseAddress}product-catalog/api.json
