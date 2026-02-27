@@ -14,12 +14,6 @@
     <dependencies>
 
         <dependency>
-            <groupId>org.eclipse.edc.template</groupId>
-            <artifactId>tmf-extension</artifactId>
-            <version>${project.version}</version>
-        </dependency>
-
-        <dependency>
             <groupId>org.mapstruct</groupId>
             <artifactId>mapstruct</artifactId>
             <version>${version.org.mapstruct}</version>
