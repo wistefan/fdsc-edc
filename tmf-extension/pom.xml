@@ -208,8 +208,7 @@
 
     <properties>
 
-        <baseAddress>/home/stefanw/git/fiware/tmforum-api/api/tm-forum/</baseAddress>
-        <!--        <baseAddress>https://raw.githubusercontent.com/FIWARE/tmforum-api/refs/heads/main/api/tm-forum/</baseAddress>-->
+        <baseAddress>https://raw.githubusercontent.com/FIWARE/tmforum-api/refs/heads/main/api/tm-forum/</baseAddress>
 
         <tmforum.productcatalog.api.url>
             ${baseAddress}product-catalog/api.json
