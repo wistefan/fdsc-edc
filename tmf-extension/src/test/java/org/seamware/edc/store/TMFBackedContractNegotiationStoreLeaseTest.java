@@ -212,13 +212,12 @@ public class TMFBackedContractNegotiationStoreLeaseTest
     verify(leaseHolder, times(1)).freeLease(eq(negotiationId), any());
   }
 
-  // --- nextNotLeased ignores isLeased field from quote ---
+  // --- nextNotLeased delegates lease check to acquireLease ---
 
   @Test
-  public void testNextNotLeased_ignores_isLeased_field_from_quote() {
-    // Set up quotes where the ContractNegotiationState.isLeased is true in the TMForum data,
-    // but the in-memory LeaseHolder says it's not leased.
-    // Current behavior: the store only checks the LeaseHolder, ignoring the quote field.
+  public void testNextNotLeased_acquires_lease_regardless_of_quote_isLeased_field() {
+    // The store no longer calls isLeased() — it relies on acquireLease() to reject
+    // already-leased negotiations. This avoids N+1 API calls with TMFBackedLeaseHolder.
     when(lockManager.writeLock(any()))
         .thenAnswer(
             invocationOnMock -> {
@@ -239,24 +238,18 @@ public class TMFBackedContractNegotiationStoreLeaseTest
 
     ContractNegotiation negotiation = getValidNegotiationWithId("neg-leased-in-tmf");
 
-    // LeaseHolder says NOT leased (in-memory)
-    when(leaseHolder.isLeased(eq("neg-leased-in-tmf"))).thenReturn(false);
-
     when(tmfEdcMapper.toContractNegotiation(any(), any(), any(), any())).thenReturn(negotiation);
 
     List<ContractNegotiation> result = tmfBackedContractNegotiationStore.nextNotLeased(10);
 
-    // Current behavior: the negotiation IS returned because the store only checks
-    // the in-memory LeaseHolder, not the isLeased field from the quote.
-    assertEquals(
-        1,
-        result.size(),
-        "Current behavior: nextNotLeased ignores the isLeased field from the quote.");
+    // acquireLease is called directly — no isLeased pre-check
+    assertEquals(1, result.size());
     verify(leaseHolder).acquireLease(eq("neg-leased-in-tmf"), any());
+    verify(leaseHolder, never()).isLeased(any());
   }
 
   @Test
-  public void testNextNotLeased_respects_in_memory_lease_holder() {
+  public void testNextNotLeased_filters_out_when_acquireLease_throws() {
     when(lockManager.writeLock(any()))
         .thenAnswer(
             invocationOnMock -> {
@@ -275,15 +268,18 @@ public class TMFBackedContractNegotiationStoreLeaseTest
 
     ContractNegotiation negotiation = getValidNegotiationWithId("neg-1");
 
-    // LeaseHolder says it IS leased (in-memory, by another thread/call)
-    when(leaseHolder.isLeased(eq("neg-1"))).thenReturn(true);
+    // acquireLease throws — simulates the lease being held by another instance
+    doThrow(new IllegalStateException("Already leased"))
+        .when(leaseHolder)
+        .acquireLease(eq("neg-1"), any());
 
     when(tmfEdcMapper.toContractNegotiation(any(), any(), any(), any())).thenReturn(negotiation);
 
     List<ContractNegotiation> result = tmfBackedContractNegotiationStore.nextNotLeased(10);
 
-    assertEquals(0, result.size(), "Negotiations leased in-memory should be filtered out.");
-    verify(leaseHolder, never()).acquireLease(eq("neg-1"), any());
+    assertEquals(
+        0, result.size(), "Negotiations where acquireLease throws should be filtered out.");
+    verify(leaseHolder, never()).isLeased(any());
   }
 
   // --- nextNotLeased partial failure ---
@@ -307,7 +303,6 @@ public class TMFBackedContractNegotiationStoreLeaseTest
     ContractNegotiation neg1 = getValidNegotiationWithId("neg-1");
     ContractNegotiation neg2 = getValidNegotiationWithId("neg-2");
 
-    when(leaseHolder.isLeased(any())).thenReturn(false);
     // neg-0 acquires successfully, neg-1 fails, neg-2 acquires successfully
     doNothing().when(leaseHolder).acquireLease(eq("neg-0"), any());
     doThrow(new IllegalStateException("race condition"))
