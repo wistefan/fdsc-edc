@@ -709,6 +709,7 @@ public class TMFBackedContractNegotiationStore implements ContractNegotiationSto
             .setState(ContractNegotiationStates.TERMINATED.name())
             .setCorrelationId(contractNegotiation.getCorrelationId())
             .setCounterPartyAddress(contractNegotiation.getCounterPartyAddress());
+    preserveLeaseFields(orginialQuote.getContractNegotiationState(), contractNegotiationState);
 
     quoteUpdateVO.setContractNegotiationState(contractNegotiationState);
     quoteUpdateVO.setExtendableQuoteItem(
@@ -751,6 +752,7 @@ public class TMFBackedContractNegotiationStore implements ContractNegotiationSto
             .setState(contractNegotiation.stateAsString())
             .setCorrelationId(contractNegotiation.getCorrelationId())
             .setCounterPartyAddress(contractNegotiation.getCounterPartyAddress());
+    preserveLeaseFields(originalQuote.getContractNegotiationState(), contractNegotiationState);
 
     quoteUpdateVO.setContractNegotiationState(contractNegotiationState);
     quoteUpdateVO.setExtendableQuoteItem(
@@ -864,6 +866,15 @@ public class TMFBackedContractNegotiationStore implements ContractNegotiationSto
       case CONSUMER -> CONSUMER_ROLE;
       case PROVIDER -> PROVIDER_ROLE;
     };
+  }
+
+  private void preserveLeaseFields(
+      ContractNegotiationState source, ContractNegotiationState target) {
+    if (source != null) {
+      target.setLeased(source.isLeased());
+      target.setLeasedBy(source.getLeasedBy());
+      target.setLeaseExpiry(source.getLeaseExpiry());
+    }
   }
 
   private record PartyWithRole(String partyId, String role) {}
