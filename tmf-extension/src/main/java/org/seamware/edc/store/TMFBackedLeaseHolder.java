@@ -19,15 +19,25 @@ package org.seamware.edc.store;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.List;
+import java.util.Set;
 import org.eclipse.edc.spi.monitor.Monitor;
 import org.seamware.edc.domain.ContractNegotiationState;
 import org.seamware.edc.domain.ExtendableQuoteUpdateVO;
 import org.seamware.edc.domain.ExtendableQuoteVO;
 import org.seamware.edc.tmf.QuoteApiClient;
+import org.seamware.tmforum.quote.model.QuoteStateTypeVO;
 
+/**
+ * Distributed lease manager that persists lease state through the TMForum Quote API. Each lease is
+ * stored as metadata on the quote's {@link ContractNegotiationState}, enabling multiple EDC
+ * controlplane instances to coordinate access to the same contract negotiation. Uses
+ * read-after-write verification to detect race conditions during lease acquisition.
+ */
 public class TMFBackedLeaseHolder implements LeaseHolder {
 
   private static final Duration DEFAULT_LEASE_TIME = Duration.ofSeconds(60);
+  private static final Set<QuoteStateTypeVO> TERMINAL_QUOTE_STATES =
+      Set.of(QuoteStateTypeVO.CANCELLED, QuoteStateTypeVO.REJECTED);
 
   private final QuoteApiClient quoteApi;
   private final String controlplane;
@@ -46,39 +56,48 @@ public class TMFBackedLeaseHolder implements LeaseHolder {
   public void acquireLease(String negotiationId, String lockId, Duration leaseTime) {
     List<ExtendableQuoteVO> quotes = quoteApi.findByNegotiationId(negotiationId);
 
-    ExtendableQuoteVO activeQuote =
+    List<ExtendableQuoteVO> lockableQuotes =
         quotes.stream()
             .filter(q -> q.getContractNegotiationState() != null)
-            .filter(q -> q.getContractNegotiationState().getControlplane().equals(controlplane))
-            .reduce((a, b) -> b)
-            .orElseThrow(
-                () -> new IllegalStateException("No quote found for negotiation " + negotiationId));
+            .filter(q -> !TERMINAL_QUOTE_STATES.contains(q.getState()))
+            .toList();
 
-    ContractNegotiationState currentState = activeQuote.getContractNegotiationState();
+    if (lockableQuotes.isEmpty()) {
+      throw new IllegalStateException("No quote found for negotiation " + negotiationId);
+    }
 
-    if (currentState.isLeased()
-        && !lockId.equals(currentState.getLeasedBy())
-        && currentState.getLeaseExpiry() > clock.millis()) {
-      throw new IllegalStateException(
-          String.format(
-              "Negotiation %s is already leased by %s until %d",
-              negotiationId, currentState.getLeasedBy(), currentState.getLeaseExpiry()));
+    // Check that none of the lockable quotes are already leased by someone else
+    for (ExtendableQuoteVO quote : lockableQuotes) {
+      ContractNegotiationState currentState = quote.getContractNegotiationState();
+      if (currentState.isLeased()
+          && !lockId.equals(currentState.getLeasedBy())
+          && isLeaseNotExpired(currentState)) {
+        throw new IllegalStateException(
+            String.format(
+                "Negotiation %s is already leased by %s until %d",
+                negotiationId, currentState.getLeasedBy(), currentState.getLeaseExpiry()));
+      }
     }
 
     long expiry = clock.millis() + leaseTime.toMillis();
-    ContractNegotiationState updatedState = copyStateWithLease(currentState, true, lockId, expiry);
 
-    ExtendableQuoteUpdateVO updateVO = new ExtendableQuoteUpdateVO();
-    updateVO.setContractNegotiationState(updatedState);
-    ExtendableQuoteVO written = quoteApi.updateQuote(activeQuote.getId(), updateVO);
+    // Acquire lease on all non-terminal quotes
+    for (ExtendableQuoteVO quote : lockableQuotes) {
+      ContractNegotiationState updatedState =
+          copyStateWithLease(quote.getContractNegotiationState(), true, lockId, expiry);
 
-    // Read-after-write verification to detect race conditions
-    ContractNegotiationState writtenState = written.getContractNegotiationState();
-    if (writtenState != null && !lockId.equals(writtenState.getLeasedBy())) {
-      throw new IllegalStateException(
-          String.format(
-              "Lost lease race on %s: expected %s, got %s",
-              negotiationId, lockId, writtenState.getLeasedBy()));
+      ExtendableQuoteUpdateVO updateVO = new ExtendableQuoteUpdateVO();
+      updateVO.setContractNegotiationState(updatedState);
+      ExtendableQuoteVO written = quoteApi.updateQuote(quote.getId(), updateVO);
+
+      // Read-after-write verification to detect race conditions
+      ContractNegotiationState writtenState = written.getContractNegotiationState();
+      if (writtenState != null && !lockId.equals(writtenState.getLeasedBy())) {
+        throw new IllegalStateException(
+            String.format(
+                "Lost lease race on %s: expected %s, got %s",
+                negotiationId, lockId, writtenState.getLeasedBy()));
+      }
     }
 
     monitor.info(
@@ -95,11 +114,11 @@ public class TMFBackedLeaseHolder implements LeaseHolder {
     List<ExtendableQuoteVO> quotes = quoteApi.findByNegotiationId(negotiationId);
     return quotes.stream()
         .filter(q -> q.getContractNegotiationState() != null)
-        .filter(q -> q.getContractNegotiationState().getControlplane().equals(controlplane))
+        .filter(q -> !TERMINAL_QUOTE_STATES.contains(q.getState()))
         .anyMatch(
             q -> {
               ContractNegotiationState state = q.getContractNegotiationState();
-              return state.isLeased() && state.getLeaseExpiry() > clock.millis();
+              return state.isLeased() && isLeaseNotExpired(state);
             });
   }
 
@@ -108,13 +127,13 @@ public class TMFBackedLeaseHolder implements LeaseHolder {
     List<ExtendableQuoteVO> quotes = quoteApi.findByNegotiationId(negotiationId);
     return quotes.stream()
         .filter(q -> q.getContractNegotiationState() != null)
-        .filter(q -> q.getContractNegotiationState().getControlplane().equals(controlplane))
+        .filter(q -> !TERMINAL_QUOTE_STATES.contains(q.getState()))
         .anyMatch(
             q -> {
               ContractNegotiationState state = q.getContractNegotiationState();
               return state.isLeased()
                   && lockId.equals(state.getLeasedBy())
-                  && state.getLeaseExpiry() > clock.millis();
+                  && isLeaseNotExpired(state);
             });
   }
 
@@ -123,7 +142,7 @@ public class TMFBackedLeaseHolder implements LeaseHolder {
     List<ExtendableQuoteVO> quotes = quoteApi.findByNegotiationId(negotiationId);
     quotes.stream()
         .filter(q -> q.getContractNegotiationState() != null)
-        .filter(q -> q.getContractNegotiationState().getControlplane().equals(controlplane))
+        .filter(q -> !TERMINAL_QUOTE_STATES.contains(q.getState()))
         .filter(q -> q.getContractNegotiationState().isLeased())
         .forEach(
             q -> {
@@ -136,6 +155,10 @@ public class TMFBackedLeaseHolder implements LeaseHolder {
             });
 
     monitor.info(String.format("Freed lease on %s because: %s", negotiationId, reason));
+  }
+
+  private boolean isLeaseNotExpired(ContractNegotiationState state) {
+    return state.getLeaseExpiry() > clock.millis();
   }
 
   private ContractNegotiationState copyStateWithLease(
