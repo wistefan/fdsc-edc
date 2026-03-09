@@ -704,6 +704,10 @@ public class TMFBackedContractNegotiationStore implements ContractNegotiationSto
             + ContractNegotiationStates.from(contractNegotiation.getState()).name());
     boolean isConsumer = contractNegotiation.getType() == ContractNegotiation.Type.CONSUMER;
 
+    // Snapshot previous state for compensation
+    QuoteStateTypeVO previousQuoteState = orginialQuote.getState();
+    ContractNegotiationState previousNegState = orginialQuote.getContractNegotiationState();
+
     ExtendableQuoteUpdateVO quoteUpdateVO = tmfEdcMapper.toUpdate(orginialQuote);
     quoteUpdateVO.setState(quoteState);
 
@@ -721,6 +725,12 @@ public class TMFBackedContractNegotiationStore implements ContractNegotiationSto
             contractNegotiation.getContractOffers(), quoteState.getValue(), isConsumer));
 
     quoteApi.updateQuote(orginialQuote.getId(), quoteUpdateVO);
+
+    registerQuoteCompensation(
+        "revert terminated quote " + orginialQuote.getId(),
+        orginialQuote.getId(),
+        previousQuoteState,
+        previousNegState);
   }
 
   private void createAgreement(ContractNegotiation contractNegotiation) {
@@ -747,6 +757,10 @@ public class TMFBackedContractNegotiationStore implements ContractNegotiationSto
             + ContractNegotiationStates.from(contractNegotiation.getState()).name());
     boolean isConsumer = contractNegotiation.getType() == ContractNegotiation.Type.CONSUMER;
 
+    // Snapshot previous state for compensation
+    QuoteStateTypeVO previousQuoteState = originalQuote.getState();
+    ContractNegotiationState previousNegState = originalQuote.getContractNegotiationState();
+
     ExtendableQuoteUpdateVO quoteUpdateVO = tmfEdcMapper.toUpdate(originalQuote);
     quoteUpdateVO.setState(quoteState);
     ContractNegotiationState contractNegotiationState =
@@ -763,6 +777,12 @@ public class TMFBackedContractNegotiationStore implements ContractNegotiationSto
             contractNegotiation.getContractOffers(), quoteState.getValue(), isConsumer));
 
     quoteApi.updateQuote(originalQuote.getId(), quoteUpdateVO);
+
+    registerQuoteCompensation(
+        "revert quote " + originalQuote.getId(),
+        originalQuote.getId(),
+        previousQuoteState,
+        previousNegState);
   }
 
   private List<ExtendableQuoteItemVO> offersToQuoteItems(
@@ -847,7 +867,17 @@ public class TMFBackedContractNegotiationStore implements ContractNegotiationSto
         .map(p -> new RelatedPartyVO().id(p.partyId()).role(p.role()))
         .forEach(quoteCreateVO::addRelatedPartyItem);
 
-    return quoteApi.createQuote(quoteCreateVO);
+    ExtendableQuoteVO created = quoteApi.createQuote(quoteCreateVO);
+
+    if (created != null) {
+      registerQuoteCompensation(
+          "cancel created quote " + created.getId(),
+          created.getId(),
+          QuoteStateTypeVO.CANCELLED,
+          null);
+    }
+
+    return created;
   }
 
   private List<PartyWithRole> getFromNegotiation(ContractNegotiation contractNegotiation) {
@@ -869,6 +899,27 @@ public class TMFBackedContractNegotiationStore implements ContractNegotiationSto
       case CONSUMER -> CONSUMER_ROLE;
       case PROVIDER -> PROVIDER_ROLE;
     };
+  }
+
+  private void registerQuoteCompensation(
+      String description,
+      String quoteId,
+      QuoteStateTypeVO revertToState,
+      ContractNegotiationState revertToNegState) {
+    SagaContext saga = transactionContext.currentSaga();
+    if (saga == null) {
+      return;
+    }
+    saga.addCompensation(
+        description,
+        () -> {
+          ExtendableQuoteUpdateVO revert = new ExtendableQuoteUpdateVO();
+          revert.setState(revertToState);
+          if (revertToNegState != null) {
+            revert.setContractNegotiationState(revertToNegState);
+          }
+          quoteApi.updateQuote(quoteId, revert);
+        });
   }
 
   private record PartyWithRole(String partyId, String role) {}
