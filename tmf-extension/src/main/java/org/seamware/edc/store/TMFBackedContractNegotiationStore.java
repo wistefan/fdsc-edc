@@ -431,7 +431,13 @@ public class TMFBackedContractNegotiationStore implements ContractNegotiationSto
             });
     productOrderCreateVO.quote(List.of(new QuoteRefVO().id(quoteVO.getId())));
 
-    productOrderApi.createProductOrder(productOrderCreateVO);
+    ProductOrderVO createdOrder = productOrderApi.createProductOrder(productOrderCreateVO);
+    if (createdOrder != null) {
+      registerProductOrderCompensation(
+          "cancel created product order " + createdOrder.getId(),
+          createdOrder.getId(),
+          ProductOrderStateTypeVO.CANCELLED);
+    }
     updateQuote(quoteVO, contractNegotiation, quoteVO.getState());
   }
 
@@ -626,7 +632,12 @@ public class TMFBackedContractNegotiationStore implements ContractNegotiationSto
         "revert finalized agreement " + extendableAgreementVO.getId(),
         extendableAgreementVO.getId(),
         previousAgreementStatus);
+    ProductOrderStateTypeVO previousOrderState = orderVO.get().getState();
     productOrderApi.updateProductOrder(orderVO.get().getId(), productOrderUpdateVO);
+    registerProductOrderCompensation(
+        "revert finalized product order " + orderVO.get().getId(),
+        orderVO.get().getId(),
+        previousOrderState);
   }
 
   private void cancelAgreements(String negotiationId) {
@@ -647,9 +658,12 @@ public class TMFBackedContractNegotiationStore implements ContractNegotiationSto
         .filter(po -> po.getState() != ProductOrderStateTypeVO.CANCELLED)
         .forEach(
             po -> {
+              ProductOrderStateTypeVO previousState = po.getState();
               ProductOrderUpdateVO poUpdate = tmfEdcMapper.toUpdate(po);
               poUpdate.setState(ProductOrderStateTypeVO.CANCELLED);
               productOrderApi.updateProductOrder(po.getId(), poUpdate);
+              registerProductOrderCompensation(
+                  "revert cancelled product order " + po.getId(), po.getId(), previousState);
             });
   }
 
@@ -950,6 +964,21 @@ public class TMFBackedContractNegotiationStore implements ContractNegotiationSto
           ExtendableAgreementUpdateVO revert = new ExtendableAgreementUpdateVO();
           revert.setStatus(revertToStatus);
           agreementApi.updateAgreement(agreementId, revert);
+        });
+  }
+
+  private void registerProductOrderCompensation(
+      String description, String orderId, ProductOrderStateTypeVO revertToState) {
+    SagaContext saga = transactionContext.currentSaga();
+    if (saga == null) {
+      return;
+    }
+    saga.addCompensation(
+        description,
+        () -> {
+          ProductOrderUpdateVO revert = new ProductOrderUpdateVO();
+          revert.setState(revertToState);
+          productOrderApi.updateProductOrder(orderId, revert);
         });
   }
 
