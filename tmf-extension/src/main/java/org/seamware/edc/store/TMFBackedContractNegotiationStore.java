@@ -40,6 +40,7 @@ import org.eclipse.edc.spi.query.Criterion;
 import org.eclipse.edc.spi.query.CriterionOperatorRegistry;
 import org.eclipse.edc.spi.query.QuerySpec;
 import org.eclipse.edc.spi.result.StoreResult;
+import org.eclipse.edc.transaction.spi.TransactionContext;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.seamware.edc.domain.*;
@@ -336,19 +337,29 @@ public class TMFBackedContractNegotiationStore implements ContractNegotiationSto
   public void save(ContractNegotiation contractNegotiation) {
     try {
       leaseHolder.acquireLease(contractNegotiation.getId(), lockId);
-      ContractNegotiationStates negotiationState =
-          ContractNegotiationStates.from(contractNegotiation.getState());
-      switch (negotiationState) {
-        case INITIAL, REQUESTING -> handleInitialStates(contractNegotiation);
-        case REQUESTED -> handleRequestedState(contractNegotiation);
-        case OFFERING, OFFERED -> handleOfferStates(contractNegotiation);
-        case ACCEPTED, ACCEPTING -> handleAcceptStates(contractNegotiation);
-        case AGREEING, AGREED -> handleAgreeStates(contractNegotiation, negotiationState);
-        case VERIFIED, VERIFYING -> handleVerificationStates(contractNegotiation);
-        case FINALIZING, FINALIZED -> handleFinalStates(contractNegotiation);
-        case TERMINATED, TERMINATING -> handleTerminationStates(contractNegotiation);
-        default -> monitor.warning(String.format("State not supported: %s", negotiationState));
-      }
+      transactionContext.execute(
+          (TransactionContext.TransactionBlock)
+              () -> {
+                try {
+                  ContractNegotiationStates negotiationState =
+                      ContractNegotiationStates.from(contractNegotiation.getState());
+                  switch (negotiationState) {
+                    case INITIAL, REQUESTING -> handleInitialStates(contractNegotiation);
+                    case REQUESTED -> handleRequestedState(contractNegotiation);
+                    case OFFERING, OFFERED -> handleOfferStates(contractNegotiation);
+                    case ACCEPTED, ACCEPTING -> handleAcceptStates(contractNegotiation);
+                    case AGREEING, AGREED ->
+                        handleAgreeStates(contractNegotiation, negotiationState);
+                    case VERIFIED, VERIFYING -> handleVerificationStates(contractNegotiation);
+                    case FINALIZING, FINALIZED -> handleFinalStates(contractNegotiation);
+                    case TERMINATED, TERMINATING -> handleTerminationStates(contractNegotiation);
+                    default ->
+                        monitor.warning(String.format("State not supported: %s", negotiationState));
+                  }
+                } catch (JsonProcessingException e) {
+                  throw new RuntimeException(e);
+                }
+              });
     } catch (Exception e) {
       monitor.warning(
           String.format("Failed to save negotiation %s.", contractNegotiation.getId()), e);
