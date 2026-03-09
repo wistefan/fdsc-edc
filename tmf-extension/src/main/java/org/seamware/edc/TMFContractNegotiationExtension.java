@@ -280,8 +280,8 @@ public class TMFContractNegotiationExtension implements ServiceExtension {
               serviceExtensionContext.getParticipantId(),
               controlplane,
               criterionOperatorRegistry,
-              new HashMapLeaseHolder(monitor, clock),
-              tmfTransactionContext());
+              tmfTransactionContext(),              new TMFBackedLeaseHolder(
+                  quoteApi(serviceExtensionContext, tmfConfig), controlplane, clock, monitor));
     }
     return contractNegotiationStore;
   }
