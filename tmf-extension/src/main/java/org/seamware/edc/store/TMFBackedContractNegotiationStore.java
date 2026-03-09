@@ -75,6 +75,7 @@ public class TMFBackedContractNegotiationStore implements ContractNegotiationSto
   private final String lockId;
   private final LockManager lockManager;
   private final LeaseHolder leaseHolder;
+  private final TMFTransactionContext transactionContext;
 
   public TMFBackedContractNegotiationStore(
       Monitor monitor,
@@ -89,7 +90,8 @@ public class TMFBackedContractNegotiationStore implements ContractNegotiationSto
       String participantId,
       String controlplane,
       CriterionOperatorRegistry criterionOperatorRegistry,
-      LeaseHolder leaseHolder) {
+      LeaseHolder leaseHolder,
+      TMFTransactionContext transactionContext) {
     this(
         monitor,
         objectMapper,
@@ -104,6 +106,7 @@ public class TMFBackedContractNegotiationStore implements ContractNegotiationSto
         controlplane,
         criterionOperatorRegistry,
         leaseHolder,
+        transactionContext,
         new AutomaticUnlockingLockManager(new ReentrantReadWriteLock(true), 10500, monitor));
   }
 
@@ -121,6 +124,7 @@ public class TMFBackedContractNegotiationStore implements ContractNegotiationSto
       String controlplane,
       CriterionOperatorRegistry criterionOperatorRegistry,
       LeaseHolder leaseHolder,
+      TMFTransactionContext transactionContext,
       LockManager lockManager) {
     this.monitor = monitor;
     this.objectMapper = objectMapper;
@@ -135,6 +139,7 @@ public class TMFBackedContractNegotiationStore implements ContractNegotiationSto
     this.leaseHolder = leaseHolder;
     this.controlplane = controlplane;
     this.criterionOperatorRegistry = criterionOperatorRegistry;
+    this.transactionContext = transactionContext;
     this.lockId = UUID.randomUUID().toString();
     this.lockManager = lockManager;
   }
