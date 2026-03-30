@@ -1007,6 +1007,7 @@ public class TMFBackedContractNegotiationStore implements ContractNegotiationSto
         () -> {
           ExtendableAgreementUpdateVO revert = new ExtendableAgreementUpdateVO();
           revert.setStatus(revertToStatus);
+          nullAgreementListFields(revert);
           agreementApi.updateAgreement(agreementId, revert);
         });
   }
@@ -1022,6 +1023,7 @@ public class TMFBackedContractNegotiationStore implements ContractNegotiationSto
         () -> {
           ProductOrderUpdateVO revert = new ProductOrderUpdateVO();
           revert.setState(revertToState);
+          nullProductOrderListFields(revert);
           productOrderApi.updateProductOrder(orderId, revert);
         });
   }
@@ -1033,6 +1035,36 @@ public class TMFBackedContractNegotiationStore implements ContractNegotiationSto
       target.setLeasedBy(source.getLeasedBy());
       target.setLeaseExpiry(source.getLeaseExpiry());
     }
+  }
+
+  /**
+   * Nulls out all list fields on an {@link ExtendableAgreementUpdateVO} so that Jackson's {@code
+   * NON_NULL} serialization omits them from the PATCH. The generated {@code AgreementUpdateVO}
+   * initializes these to {@code new ArrayList<>()}, which would be serialized as empty arrays and
+   * cause the TMF API to clear existing data or return 400.
+   */
+  public static void nullAgreementListFields(ExtendableAgreementUpdateVO update) {
+    update.setAgreementAuthorization(null);
+    update.setAgreementItem(null);
+    update.setAssociatedAgreement(null);
+    update.setCharacteristic(null);
+    update.setEngagedParty(null);
+  }
+
+  /**
+   * Nulls out all list fields on a {@link ProductOrderUpdateVO}. Same reason as {@link
+   * #nullAgreementListFields}.
+   */
+  static void nullProductOrderListFields(ProductOrderUpdateVO update) {
+    update.setAgreement(null);
+    update.setChannel(null);
+    update.setNote(null);
+    update.setOrderTotalPrice(null);
+    update.setPayment(null);
+    update.setProductOfferingQualification(null);
+    update.setProductOrderItem(null);
+    update.setQuote(null);
+    update.setRelatedParty(null);
   }
 
   private record PartyWithRole(String partyId, String role) {}

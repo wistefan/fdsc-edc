@@ -26,6 +26,7 @@ import okhttp3.*;
 import org.eclipse.edc.spi.monitor.Monitor;
 import org.eclipse.edc.web.spi.exception.BadGatewayException;
 import org.seamware.edc.domain.*;
+import org.seamware.edc.store.TMFBackedContractNegotiationStore;
 
 public class AgreementApiClient extends ApiClient {
 
@@ -178,6 +179,7 @@ public class AgreementApiClient extends ApiClient {
       try {
         ExtendableAgreementUpdateVO rejectUpdate = new ExtendableAgreementUpdateVO();
         rejectUpdate.setStatus(AgreementState.REJECTED.getValue());
+        TMFBackedContractNegotiationStore.nullAgreementListFields(rejectUpdate);
         updateAgreement(duplicateId, rejectUpdate);
         monitor.info(String.format("Rejected duplicate agreement %s.", duplicateId));
       } catch (RuntimeException e) {
