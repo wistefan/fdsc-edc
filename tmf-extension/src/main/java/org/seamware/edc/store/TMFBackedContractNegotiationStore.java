@@ -23,6 +23,7 @@ import static org.seamware.edc.tmf.ParticipantResolver.PROVIDER_ROLE;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
@@ -77,6 +78,7 @@ public class TMFBackedContractNegotiationStore implements ContractNegotiationSto
   private final LockManager lockManager;
   private final LeaseHolder leaseHolder;
   private final TMFTransactionContext transactionContext;
+  private final ConcurrentHashMap<String, Object> negotiationLocks = new ConcurrentHashMap<>();
 
   public TMFBackedContractNegotiationStore(
       Monitor monitor,
@@ -336,39 +338,46 @@ public class TMFBackedContractNegotiationStore implements ContractNegotiationSto
 
   @Override
   public void save(ContractNegotiation contractNegotiation) {
-    try {
-      leaseHolder.acquireLease(contractNegotiation.getId(), lockId);
-      transactionContext.execute(
-          (TransactionContext.TransactionBlock)
-              () -> {
-                try {
-                  ContractNegotiationStates negotiationState =
-                      ContractNegotiationStates.from(contractNegotiation.getState());
-                  switch (negotiationState) {
-                    case INITIAL, REQUESTING -> handleInitialStates(contractNegotiation);
-                    case REQUESTED -> handleRequestedState(contractNegotiation);
-                    case OFFERING, OFFERED -> handleOfferStates(contractNegotiation);
-                    case ACCEPTED, ACCEPTING -> handleAcceptStates(contractNegotiation);
-                    case AGREEING, AGREED ->
-                        handleAgreeStates(contractNegotiation, negotiationState);
-                    case VERIFIED, VERIFYING -> handleVerificationStates(contractNegotiation);
-                    case FINALIZING, FINALIZED -> handleFinalStates(contractNegotiation);
-                    case TERMINATED, TERMINATING -> handleTerminationStates(contractNegotiation);
-                    default ->
-                        monitor.warning(String.format("State not supported: %s", negotiationState));
+    // Per-negotiation lock prevents concurrent saves for the same negotiation within this
+    // JVM. Without this, two DSP message handlers can enter handleAgreeStates simultaneously
+    // and both create agreements before either sees the other's, producing duplicates.
+    Object lock = negotiationLocks.computeIfAbsent(contractNegotiation.getId(), k -> new Object());
+    synchronized (lock) {
+      try {
+        leaseHolder.acquireLease(contractNegotiation.getId(), lockId);
+        transactionContext.execute(
+            (TransactionContext.TransactionBlock)
+                () -> {
+                  try {
+                    ContractNegotiationStates negotiationState =
+                        ContractNegotiationStates.from(contractNegotiation.getState());
+                    switch (negotiationState) {
+                      case INITIAL, REQUESTING -> handleInitialStates(contractNegotiation);
+                      case REQUESTED -> handleRequestedState(contractNegotiation);
+                      case OFFERING, OFFERED -> handleOfferStates(contractNegotiation);
+                      case ACCEPTED, ACCEPTING -> handleAcceptStates(contractNegotiation);
+                      case AGREEING, AGREED ->
+                          handleAgreeStates(contractNegotiation, negotiationState);
+                      case VERIFIED, VERIFYING -> handleVerificationStates(contractNegotiation);
+                      case FINALIZING, FINALIZED -> handleFinalStates(contractNegotiation);
+                      case TERMINATED, TERMINATING -> handleTerminationStates(contractNegotiation);
+                      default ->
+                          monitor.warning(
+                              String.format("State not supported: %s", negotiationState));
+                    }
+                  } catch (JsonProcessingException e) {
+                    throw new RuntimeException(e);
                   }
-                } catch (JsonProcessingException e) {
-                  throw new RuntimeException(e);
-                }
-              });
-    } catch (Exception e) {
-      monitor.warning(
-          String.format("Failed to save negotiation %s.", contractNegotiation.getId()), e);
-      throw new EdcPersistenceException(
-          String.format("Failed to save negotiation %s.", contractNegotiation.getId()), e);
-    } finally {
-      // always give up the lock
-      leaseHolder.freeLease(contractNegotiation.getId(), "Finally saved.");
+                });
+      } catch (Exception e) {
+        monitor.warning(
+            String.format("Failed to save negotiation %s.", contractNegotiation.getId()), e);
+        throw new EdcPersistenceException(
+            String.format("Failed to save negotiation %s.", contractNegotiation.getId()), e);
+      } finally {
+        // always give up the lock
+        leaseHolder.freeLease(contractNegotiation.getId(), "Finally saved.");
+      }
     }
   }
 
