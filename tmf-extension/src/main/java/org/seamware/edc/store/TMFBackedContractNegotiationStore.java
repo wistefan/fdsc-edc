@@ -533,12 +533,16 @@ public class TMFBackedContractNegotiationStore implements ContractNegotiationSto
   private void handleRequestedState(ContractNegotiation contractNegotiation)
       throws JsonProcessingException {
     List<ExtendableQuoteVO> quotes = getQuotes(contractNegotiation);
-    // TODO: check why requested was part of the active states
+    // REQUESTED must be included: a concurrent save from handleInitialStates can update
+    // the quote's contractNegotiationState.state to REQUESTED before this handler runs.
     Optional<ExtendableQuoteVO> activeQuote =
         getActiveQuote(
             quotes,
             contractNegotiation,
-            List.of(ContractNegotiationStates.INITIAL, ContractNegotiationStates.REQUESTING));
+            List.of(
+                ContractNegotiationStates.INITIAL,
+                ContractNegotiationStates.REQUESTING,
+                ContractNegotiationStates.REQUESTED));
     if (activeQuote.isEmpty()) {
       monitor.debug(
           "Create quote in requested - existing quotes " + objectMapper.writeValueAsString(quotes));
