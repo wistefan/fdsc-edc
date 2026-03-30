@@ -473,7 +473,15 @@ public class TMFBackedContractNegotiationStore implements ContractNegotiationSto
     } else {
       updateQuote(activeQuote.get(), contractNegotiation, QuoteStateTypeVO.ACCEPTED);
       if (contractNegotiation.getContractAgreement() != null) {
-        createAgreement(contractNegotiation);
+        boolean agreementExists =
+            agreementApi
+                .findByContractId(contractNegotiation.getContractAgreement().getId())
+                .isPresent();
+        if (agreementExists) {
+          monitor.info("The agreement is already created.");
+        } else {
+          createAgreement(contractNegotiation);
+        }
       }
     }
   }
