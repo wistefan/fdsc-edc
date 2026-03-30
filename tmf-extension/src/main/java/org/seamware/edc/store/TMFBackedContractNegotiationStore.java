@@ -744,6 +744,9 @@ public class TMFBackedContractNegotiationStore implements ContractNegotiationSto
 
     ExtendableQuoteUpdateVO quoteUpdateVO = tmfEdcMapper.toUpdate(orginialQuote);
     quoteUpdateVO.setState(quoteState);
+    // Null out relatedParty to prevent the PATCH from clearing existing entries.
+    // See updateQuote for the detailed explanation.
+    quoteUpdateVO.setRelatedParty(null);
 
     ContractNegotiationState contractNegotiationState =
         new ContractNegotiationState()
@@ -793,7 +796,7 @@ public class TMFBackedContractNegotiationStore implements ContractNegotiationSto
       ExtendableQuoteVO originalQuote,
       ContractNegotiation contractNegotiation,
       QuoteStateTypeVO quoteState) {
-    monitor.warning(
+    monitor.debug(
         "Update existing quote for negotiation "
             + contractNegotiation.getId()
             + " - state "
@@ -806,6 +809,12 @@ public class TMFBackedContractNegotiationStore implements ContractNegotiationSto
 
     ExtendableQuoteUpdateVO quoteUpdateVO = tmfEdcMapper.toUpdate(originalQuote);
     quoteUpdateVO.setState(quoteState);
+    // Null out relatedParty so that the PATCH does not overwrite existing entries.
+    // The generated QuoteVO initializes relatedParty to an empty ArrayList, so MapStruct
+    // copies that empty list even when the TMF API response omitted the field. With
+    // NON_NULL serialization, an empty list would be sent as "relatedParty": [], causing
+    // the TMF API to clear the related parties that were set during quote creation.
+    quoteUpdateVO.setRelatedParty(null);
     ContractNegotiationState contractNegotiationState =
         new ContractNegotiationState()
             .setControlplane(controlplane)
