@@ -23,6 +23,8 @@ import static org.seamware.edc.tmf.ParticipantResolver.PROVIDER_ROLE;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.*;
+import java.util.Collections;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.Predicate;
@@ -79,6 +81,16 @@ public class TMFBackedContractNegotiationStore implements ContractNegotiationSto
   private final LeaseHolder leaseHolder;
   private final TMFTransactionContext transactionContext;
   private final ConcurrentHashMap<String, Object> negotiationLocks = new ConcurrentHashMap<>();
+
+  /**
+   * Tracks negotiation IDs that are currently being processed within this JVM. Populated by {@link
+   * #nextNotLeased} and {@link #findByIdAndLease} when they acquire a lease, cleared by {@link
+   * #save} when it releases the lease. This prevents the same negotiation from being picked up by
+   * the state machine while a previous processing cycle is still running, which the distributed
+   * lease alone cannot do because all threads in the same instance share the same {@code lockId}.
+   */
+  private final Set<String> activeNegotiations =
+      Collections.newSetFromMap(new ConcurrentHashMap<>());
 
   public TMFBackedContractNegotiationStore(
       Monitor monitor,
@@ -295,10 +307,12 @@ public class TMFBackedContractNegotiationStore implements ContractNegotiationSto
       return lockManager.writeLock(
           () ->
               getNegotiations(Arrays.asList(criteria)).stream()
+                  .filter(cn -> !activeNegotiations.contains(cn.getId()))
                   .filter(
                       cn -> {
                         try {
                           leaseHolder.acquireLease(cn.getId(), lockId);
+                          activeNegotiations.add(cn.getId());
                           return true;
                         } catch (Exception e) {
                           monitor.info(String.format("Was not able to lease %s", cn.getId()), e);
@@ -319,12 +333,16 @@ public class TMFBackedContractNegotiationStore implements ContractNegotiationSto
       return lockManager.writeLock(
           () -> {
             monitor.info("Find by Id and Lease " + s);
+            if (activeNegotiations.contains(s)) {
+              return StoreResult.alreadyLeased(String.format("%s is already leased.", s));
+            }
             ContractNegotiation contractNegotiation = findById(s);
             if (contractNegotiation == null) {
               return StoreResult.notFound(String.format("Negotiation %s does not exist.", s));
             }
             try {
               leaseHolder.acquireLease(s, lockId);
+              activeNegotiations.add(s);
               return StoreResult.success(contractNegotiation);
             } catch (IllegalStateException e) {
               return StoreResult.alreadyLeased(String.format("%s is already leased.", s));
@@ -377,6 +395,7 @@ public class TMFBackedContractNegotiationStore implements ContractNegotiationSto
       } finally {
         // always give up the lock
         leaseHolder.freeLease(contractNegotiation.getId(), "Finally saved.");
+        activeNegotiations.remove(contractNegotiation.getId());
       }
     }
   }
