@@ -193,7 +193,7 @@ TCK configuration files are in `config/tck/`:
 | `tck.properties` | TCK runtime settings — connector endpoints, callback addresses, and test scenario IDs (dataset IDs, offer IDs, agreement IDs) matching `DataAssembly.java` |
 | `edc.properties` | EDC controlplane settings for TCK mode — enables test extensions, configures API ports, and disables production features (FDSC transfer, DCP) |
 
-The Docker Compose file (`docker-compose.tck.yml`) mounts these configuration files into the containers. If you need to customize connector endpoints or test IDs, edit the properties files before running.
+The Docker Compose file (`docker-compose.tck.yml`) orchestrates PostGIS, Scorpio (NGSI-LD context broker), TMForum API (backed by Scorpio), the EDC controlplane, and the TCK runner. Configuration files are mounted into the containers. If you need to customize connector endpoints or test IDs, edit the properties files before running.
 
 ### CI Integration
 

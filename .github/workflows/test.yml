@@ -98,6 +98,10 @@ jobs:
         if: failure()
         run: |
           mkdir -p tck-logs
+          docker compose -f docker-compose.tck.yml logs postgis > tck-logs/postgis.log 2>&1 || true
+          docker compose -f docker-compose.tck.yml logs scorpio > tck-logs/scorpio.log 2>&1 || true
+          docker compose -f docker-compose.tck.yml logs tmforum > tck-logs/tmforum.log 2>&1 || true
+          docker compose -f docker-compose.tck.yml logs tmf-init > tck-logs/tmf-init.log 2>&1 || true
           docker compose -f docker-compose.tck.yml logs edc > tck-logs/edc.log 2>&1 || true
           docker compose -f docker-compose.tck.yml logs tck > tck-logs/tck.log 2>&1 || true
 

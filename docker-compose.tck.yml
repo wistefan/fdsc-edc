@@ -1,8 +1,9 @@
 #
 # Docker Compose for DSP TCK Conformance Testing
 #
-# Orchestrates the TMForum API, fdsc-edc controlplane, and the Eclipse DSP TCK
-# runner. Uses the FIWARE tmforum-api all-in-one with in-memory storage profile.
+# Orchestrates PostGIS, Scorpio (NGSI-LD context broker), TMForum API,
+# fdsc-edc controlplane, and the Eclipse DSP TCK runner. TMForum uses
+# Scorpio as its storage backend, matching the production deployment topology.
 #
 # Usage:
 #   docker compose -f docker-compose.tck.yml up --build --abort-on-container-exit --exit-code-from tck
@@ -19,22 +20,74 @@
 
 services:
   # -------------------------------------------------------------------------
-  # TMForum API (all-in-one, in-memory storage)
+  # PostGIS — PostgreSQL with spatial extensions for Scorpio
+  # -------------------------------------------------------------------------
+  postgis:
+    image: postgis/postgis
+    environment:
+      POSTGRES_USER: ngb
+      POSTGRES_PASSWORD: ngb
+      POSTGRES_DB: ngb
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ngb -d ngb"]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+      start_period: 10s
+    networks:
+      - tck-net
+
+  # -------------------------------------------------------------------------
+  # Scorpio — NGSI-LD Context Broker (storage backend for TMForum API)
+  # -------------------------------------------------------------------------
+  scorpio:
+    image: scorpiobroker/all-in-one-runner:java-5.0.3
+    environment:
+      DBHOST: postgis
+      DBPORT: "5432"
+      DBUSER: ngb
+      DBPASS: ngb
+      POSTGRES_DB: ngb
+      POSTGRES_USER: ngb
+      POSTGRES_PASSWORD: ngb
+      QUARKUS_LOG_LEVEL: INFO
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:9090/q/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 40s
+    depends_on:
+      postgis:
+        condition: service_healthy
+    networks:
+      - tck-net
+
+  # -------------------------------------------------------------------------
+  # TMForum API (all-in-one, backed by Scorpio context broker)
   # -------------------------------------------------------------------------
   # FIWARE TMForum API implementation providing the storage backend for
   # EDC assets, contract definitions, policies, and agreements.
-  # Uses the in-memory profile so no external context broker is required.
+  # Uses Scorpio NGSI-LD context broker for persistent storage.
   # -------------------------------------------------------------------------
   tmforum:
     image: quay.io/fiware/tmforum-all-in-one:${TMF_VERSION:-0.25.0}
     environment:
-      MICRONAUT_ENVIRONMENTS: in-memory
+      MICRONAUT_HTTP_SERVICES_NGSI_URL: http://scorpio:9090
+      MICRONAUT_HTTP_SERVICES_NGSI_PATH: ngsi-ld/v1
+      MICRONAUT_CACHES_ENTITIES_MAXIMUM_SIZE: "1000"
+      MICRONAUT_CACHES_ENTITIES_EXPIRE_AFTER_WRITE: 2s
+      MICRONAUT_CACHES_ENTITIES_EXPIRE_AFTER_ACCESS: 2s
+      MICRONAUT_HTTP_SERVICES_READ_TIMEOUT: 30s
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:8632/health"]
       interval: 5s
       timeout: 3s
-      retries: 20
-      start_period: 15s
+      retries: 30
+      start_period: 20s
+    depends_on:
+      scorpio:
+        condition: service_healthy
     networks:
       - tck-net
 
@@ -51,7 +104,7 @@ services:
     environment:
       TMF_BASE_URL: http://tmforum:8632
       PARTICIPANT_ID: urn:connector:fdsc-edc
-      MAX_RETRIES: "60"
+      MAX_RETRIES: "90"
       RETRY_INTERVAL: "2"
     volumes:
       - ./scripts/init-tmforum.sh:/scripts/init-tmforum.sh:ro
