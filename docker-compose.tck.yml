@@ -1,12 +1,14 @@
 #
 # Docker Compose for DSP TCK Conformance Testing
 #
-# Orchestrates the fdsc-edc controlplane and the Eclipse DSP TCK runner.
+# Orchestrates the TMForum API, fdsc-edc controlplane, and the Eclipse DSP TCK
+# runner. Uses the FIWARE tmforum-api all-in-one with in-memory storage profile.
+#
 # Usage:
 #   docker compose -f docker-compose.tck.yml up --build --abort-on-container-exit --exit-code-from tck
 #
 # To override the TCK image version:
-#   DSP_TCK_VERSION=0.9.0 docker compose -f docker-compose.tck.yml up --build --abort-on-container-exit --exit-code-from tck
+#   DSP_TCK_VERSION=1.0.0-RC6 docker compose -f docker-compose.tck.yml up --build --abort-on-container-exit --exit-code-from tck
 #
 # Prerequisites:
 #   - Build the controlplane shaded JAR first:
@@ -17,21 +19,45 @@
 
 services:
   # -------------------------------------------------------------------------
-  # HashiCorp Vault (dev mode) — required by the vault-hashicorp EDC extension
+  # TMForum API (all-in-one, in-memory storage)
   # -------------------------------------------------------------------------
-  vault:
-    image: hashicorp/vault:1.17
+  # FIWARE TMForum API implementation providing the storage backend for
+  # EDC assets, contract definitions, policies, and agreements.
+  # Uses the in-memory profile so no external context broker is required.
+  # -------------------------------------------------------------------------
+  tmforum:
+    image: quay.io/fiware/tmforum-all-in-one:${TMF_VERSION:-0.25.0}
     environment:
-      VAULT_DEV_ROOT_TOKEN_ID: root-token
-      VAULT_DEV_LISTEN_ADDRESS: "0.0.0.0:8200"
-    cap_add:
-      - IPC_LOCK
+      MICRONAUT_ENVIRONMENTS: in-memory
     healthcheck:
-      test: ["CMD", "vault", "status"]
+      test: ["CMD", "curl", "-sf", "http://localhost:8632/health"]
       interval: 5s
       timeout: 3s
-      retries: 10
-      start_period: 5s
+      retries: 20
+      start_period: 15s
+    networks:
+      - tck-net
+
+  # -------------------------------------------------------------------------
+  # TMForum Data Initializer
+  # -------------------------------------------------------------------------
+  # One-shot container that populates the TMForum instance with the test
+  # data required by the DSP TCK scenarios (assets, contract definitions,
+  # agreements). Exits after initialization completes.
+  # -------------------------------------------------------------------------
+  tmf-init:
+    image: curlimages/curl:8.11.1
+    entrypoint: ["/bin/sh", "/scripts/init-tmforum.sh"]
+    environment:
+      TMF_BASE_URL: http://tmforum:8632
+      PARTICIPANT_ID: urn:connector:fdsc-edc
+      MAX_RETRIES: "60"
+      RETRY_INTERVAL: "2"
+    volumes:
+      - ./scripts/init-tmforum.sh:/scripts/init-tmforum.sh:ro
+    depends_on:
+      tmforum:
+        condition: service_healthy
     networks:
       - tck-net
 
@@ -61,8 +87,8 @@ services:
       retries: 30
       start_period: 30s
     depends_on:
-      vault:
-        condition: service_healthy
+      tmf-init:
+        condition: service_completed_successfully
     networks:
       - tck-net
 

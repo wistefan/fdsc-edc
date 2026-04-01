@@ -84,11 +84,10 @@
             <artifactId>connector-core</artifactId>
             <version>${edc.version}</version>
         </dependency>
-        <dependency>
-            <groupId>org.eclipse.edc</groupId>
-            <artifactId>vault-hashicorp</artifactId>
-            <version>${edc.version}</version>
-        </dependency>
+        <!-- Vault is provided by the test-extension InMemoryVault when
+             testExtension.identity.enabled=true. For production deployments,
+             add vault-hashicorp (or another Vault provider) as a runtime
+             dependency in a deployment-specific profile. -->
         <dependency>
             <groupId>org.eclipse.edc</groupId>
             <artifactId>runtime-core</artifactId>

@@ -60,6 +60,9 @@ public class TckGuardExtension implements ServiceExtension {
   private static final Logger LOG = Logger.getLogger(TckGuardExtension.class.getName());
   private static final String NAME = "DSP TCK Guard";
 
+  /** Configuration property that controls whether the TMForum storage backend is enabled. */
+  private static final String TMF_ENABLED_PROPERTY = "tmfExtension.enabled";
+
   private volatile ContractNegotiationGuard negotiationGuard;
 
   private volatile TransferProcessGuard transferProcessGuard;
@@ -87,7 +90,15 @@ public class TckGuardExtension implements ServiceExtension {
   public void initialize(ServiceExtensionContext context) {
     TestConfig testConfig = TestConfig.fromConfig(context.getConfig());
     if (testConfig.isEnabled()) {
-      initializeTestData(context.getParticipantId());
+      boolean tmfEnabled =
+          Boolean.parseBoolean(context.getConfig().getString(TMF_ENABLED_PROPERTY, "false"));
+      if (tmfEnabled) {
+        LOG.info(
+            "TMForum extension is enabled — skipping in-memory test data initialization. "
+                + "Assets, policies, contract definitions, and agreements are provided by TMForum.");
+      } else {
+        initializeTestData(context.getParticipantId());
+      }
       context.registerService(TransferProcessPendingGuard.class, transferProcessPendingGuard());
       context.registerService(ContractNegotiationPendingGuard.class, negotiationGuard());
     }
@@ -95,7 +106,8 @@ public class TckGuardExtension implements ServiceExtension {
 
   /**
    * Populates the EDC in-memory stores with test assets, policies, contract definitions, and
-   * pre-signed agreements required by the DSP TCK test scenarios.
+   * pre-signed agreements required by the DSP TCK test scenarios. This method is only called when
+   * the TMForum extension is disabled (i.e., EDC uses in-memory stores).
    *
    * @param participantId the connector's participant ID from the runtime configuration
    */
