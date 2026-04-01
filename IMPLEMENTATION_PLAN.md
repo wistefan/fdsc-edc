@@ -2,11 +2,62 @@
 
 ## Overview
 
-Integrate the Eclipse DSP Technology Compatibility Kit (TCK) into the fdsc-edc project so that DSP conformance tests run automatically on every push in CI, and can also be executed locally from the command line. The repository already has significant TCK groundwork in the `test-extension` module (webhook controller, guards, step recorders, test identity service); this plan focuses on creating the runtime configuration, Docker Compose orchestration, local run script, and CI workflow to wire everything together.
+Integrate the Eclipse DSP Technology Compatibility Kit (TCK) into the fdsc-edc project so that DSP conformance tests run automatically on every push in CI, and can also be executed locally from the command line. The repository already has significant TCK groundwork in the `test-extension` module (webhook controller, guards, step recorders, test identity service); however, analysis reveals several race conditions and thread-safety issues in those components that must be fixed before reliable TCK execution is possible. This plan first addresses those concurrency issues, then focuses on creating the runtime configuration, Docker Compose orchestration, local run script, and CI workflow to wire everything together.
 
 ## Steps
 
-### Step 1: Create the TCK configuration properties file
+### Step 1: Analyze and fix race conditions in the test-extension module
+
+Audit all classes in the `test-extension` module for thread-safety issues and fix identified race conditions to ensure reliable, deterministic TCK test execution.
+
+**Details:**
+
+Analysis of the test-extension module reveals several concurrency defects that can cause flaky TCK runs, missed state transitions, or `ConcurrentModificationException` errors. The following issues must be addressed:
+
+1. **`StepRecorder.java` — unsynchronized `Sequence` inner class:**
+   - The `playNext()` method on the inner `Sequence` class is not synchronized, while the outer `StepRecorder` methods are. The `playIndex` field and `steps` list can be read/written concurrently from different threads.
+   - **Fix:** Make `Sequence.playNext()` synchronized, or use an `AtomicInteger` for `playIndex` and a `CopyOnWriteArrayList` for `steps`. Alternatively, synchronize on the `Sequence` object in both `addStep()` and `playNext()`.
+
+2. **`DelayedActionGuard.java` — entity mutation and missing error handling:**
+   - The action/setPending/save sequence (lines 79–81) is not atomic — another thread from the event router can modify the entity between the action and the save.
+   - The `GuardDelay.entity` field is non-final and shared across threads without memory barriers.
+   - **Fix:** Wrap the action-setPending-save sequence in a `transactionContext.execute()` block. Make the `entity` field `final` in `GuardDelay`. Add try-catch around the action to ensure `setPending(false)` and `save()` still execute on failure.
+
+3. **`ContractNegotiationTriggerSubscriber.java` — unsynchronized `ArrayList`:**
+   - The `triggers` field is a plain `ArrayList` shared between `register()` (called at startup) and `on()` (called from the event router on arbitrary threads). Concurrent access can cause `ConcurrentModificationException` or missed triggers.
+   - The lease acquired via `findByIdAndLease()` is not released in a try-finally block, risking leaked leases on exception.
+   - **Fix:** Replace `ArrayList` with `CopyOnWriteArrayList`. Wrap the lease-acquire + action + save in a try-finally that releases the lease on failure.
+
+4. **`TransferProcessTriggerSubscriber.java` — same issues as (3), plus missing `transactionContext`:**
+   - Same unsynchronized `ArrayList` issue.
+   - Unlike `ContractNegotiationTriggerSubscriber`, this class does not wrap store operations in `transactionContext.execute()`, allowing concurrent state corruption.
+   - **Fix:** Replace `ArrayList` with `CopyOnWriteArrayList`. Wrap store operations in `transactionContext.execute()`. Add try-finally for lease handling.
+
+5. **`DataAssembly.java` — `suspendResumeTrigger()` check-then-act on `AtomicInteger`:**
+   - The pattern `if (count.get() == 0) { count.incrementAndGet(); ... }` is not atomic — two concurrent calls can both read `0` and both execute the suspend branch, skipping the resume branch entirely.
+   - **Fix:** Use `compareAndSet(0, 1)` / `compareAndSet(1, 0)` to make the check-and-update atomic.
+
+6. **`TckGuardExtension.java` — non-volatile mutable fields:**
+   - `negotiationGuard` and `transferProcessGuard` fields are written during `initialize()` and read during `prepare()` and `shutdown()`, potentially on different threads, without volatile or synchronization.
+   - **Fix:** Declare these fields `volatile`, or use `AtomicReference`.
+
+**Files affected:**
+- `test-extension/src/main/java/org/seamware/edc/edc/StepRecorder.java`
+- `test-extension/src/main/java/org/seamware/edc/edc/DelayedActionGuard.java`
+- `test-extension/src/main/java/org/seamware/edc/edc/ContractNegotiationTriggerSubscriber.java`
+- `test-extension/src/main/java/org/seamware/edc/edc/TransferProcessTriggerSubscriber.java`
+- `test-extension/src/main/java/org/seamware/edc/edc/DataAssembly.java`
+- `test-extension/src/main/java/org/seamware/edc/edc/TckGuardExtension.java`
+
+**Acceptance criteria:**
+- All mutable shared state is protected by appropriate synchronization primitives (`synchronized`, `volatile`, `CopyOnWriteArrayList`, `AtomicReference`, `compareAndSet`).
+- No `ArrayList` or other non-thread-safe collections are used for state shared across threads.
+- Lease resources are properly released in try-finally blocks.
+- `transactionContext` is used consistently for store operations in both trigger subscribers.
+- Existing unit tests continue to pass after the fixes (`mvn test -pl test-extension`).
+- No new Spotless violations (`mvn spotless:check`).
+
+### Step 2: Create the TCK configuration properties file
 
 Create `config/tck/tck.properties` containing all DSP TCK configuration properties required by the `eclipsedataspacetck/dsp-tck-runtime` Docker image.
 
@@ -32,7 +83,7 @@ Create `config/tck/tck.properties` containing all DSP TCK configuration properti
 - The properties file contains all required TCK configuration keys with correct values matching the existing `DataAssembly.java` asset/agreement IDs.
 - Properties use Docker Compose service names for hostnames so they work in the compose network.
 
-### Step 2: Create the EDC controlplane configuration for TCK mode
+### Step 3: Create the EDC controlplane configuration for TCK mode
 
 Create an EDC properties file that configures the controlplane to run in TCK-compatible mode, enabling the test extensions and setting up the required EDC ports and paths.
 
@@ -56,7 +107,7 @@ Create an EDC properties file that configures the controlplane to run in TCK-com
 - Test identity, TCK controller, and TCK guard extensions are enabled.
 - Ports match those referenced in `tck.properties`.
 
-### Step 3: Create Docker Compose file for TCK orchestration
+### Step 4: Create Docker Compose file for TCK orchestration
 
 Create a `docker-compose.tck.yml` at the repository root that orchestrates the controlplane and TCK runner containers.
 
@@ -83,7 +134,7 @@ Create a `docker-compose.tck.yml` at the repository root that orchestrates the c
 - The TCK container waits for the EDC controlplane to be healthy before starting tests.
 - The TCK container's exit code reflects test pass (0) or failure (non-zero).
 
-### Step 4: Create a local run script for TCK tests
+### Step 5: Create a local run script for TCK tests
 
 Create a shell script `scripts/run-tck.sh` that allows developers to run TCK conformance tests from the command line with a single command.
 
@@ -108,7 +159,7 @@ Create a shell script `scripts/run-tck.sh` that allows developers to run TCK con
 - The script exits with a non-zero code if TCK tests fail.
 - The `--skip-build` flag works correctly.
 
-### Step 5: Add the TCK conformance test job to the CI workflow
+### Step 6: Add the TCK conformance test job to the CI workflow
 
 Extend the existing `.github/workflows/test.yml` (or create a new workflow file) to run DSP TCK conformance tests on every push.
 
@@ -133,7 +184,7 @@ Extend the existing `.github/workflows/test.yml` (or create a new workflow file)
 - Container logs are uploaded as artifacts on failure for debugging.
 - The workflow is efficient (builds only what is needed, uses caching where possible).
 
-### Step 6: Add Maven caching and Docker layer caching to CI
+### Step 7: Add Maven caching and Docker layer caching to CI
 
 Optimize CI performance by adding Maven dependency caching and Docker build caching to the workflow.
 
@@ -149,7 +200,7 @@ Optimize CI performance by adding Maven dependency caching and Docker build cach
 - Subsequent CI runs with unchanged dependencies are significantly faster.
 - Cache keys are correctly scoped to avoid stale caches.
 
-### Step 7: Add documentation for running TCK tests
+### Step 8: Add documentation for running TCK tests
 
 Update project documentation to explain how to run DSP conformance tests locally and in CI.
 
@@ -170,7 +221,7 @@ Update project documentation to explain how to run DSP conformance tests locally
 - A developer can follow the README instructions to run TCK tests locally.
 - The documentation is clear and complete.
 
-### Step 8: Verify end-to-end TCK integration
+### Step 9: Verify end-to-end TCK integration
 
 Perform a final verification pass to ensure all components work together correctly.
 
@@ -184,7 +235,7 @@ Perform a final verification pass to ensure all components work together correct
 - Fix any configuration mismatches or runtime issues discovered during verification.
 
 **Files affected:**
-- Potentially any files from Steps 1-7 if fixes are needed.
+- Potentially any files from Steps 1-8 if fixes are needed.
 
 **Acceptance criteria:**
 - All TCK test suites pass against the controlplane.
