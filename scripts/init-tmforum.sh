@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/sh
 #
 # Copyright 2025 Seamless Middleware Technologies S.L and/or its affiliates
 # and other contributors as indicated by the @author tags.
@@ -25,6 +25,8 @@
 #   - ProductOfferings      (mapped to EDC contract definitions)
 #   - Agreements            (mapped to EDC contract agreements)
 #
+# POSIX sh compatible — runs in BusyBox/Alpine containers (curlimages/curl).
+#
 # Usage:
 #   TMF_BASE_URL=http://tmforum:8632 ./scripts/init-tmforum.sh
 #
@@ -35,50 +37,37 @@
 #   RETRY_INTERVAL  Seconds between retries (default: 2)
 ###############################################################################
 
-set -euo pipefail
+set -eu
 
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
-readonly TMF_BASE_URL="${TMF_BASE_URL:-http://tmforum:8632}"
-readonly PARTICIPANT_ID="${PARTICIPANT_ID:-urn:connector:fdsc-edc}"
-readonly MAX_RETRIES="${MAX_RETRIES:-60}"
-readonly RETRY_INTERVAL="${RETRY_INTERVAL:-2}"
+TMF_BASE_URL="${TMF_BASE_URL:-http://tmforum:8632}"
+PARTICIPANT_ID="${PARTICIPANT_ID:-urn:connector:fdsc-edc}"
+MAX_RETRIES="${MAX_RETRIES:-60}"
+RETRY_INTERVAL="${RETRY_INTERVAL:-2}"
 
-readonly CATALOG_API="${TMF_BASE_URL}/tmf-api/productCatalogManagement/v4"
-readonly AGREEMENT_API="${TMF_BASE_URL}/tmf-api/agreementManagement/v4"
+CATALOG_API="${TMF_BASE_URL}/tmf-api/productCatalogManagement/v4"
+AGREEMENT_API="${TMF_BASE_URL}/tmf-api/agreementManagement/v4"
 
 # TCK participant ID used in agreements
-readonly TCK_PARTICIPANT="TCK_PARTICIPANT"
+TCK_PARTICIPANT="TCK_PARTICIPANT"
 # Policy ID matching DataAssembly.POLICY_ID
-readonly POLICY_ID="P123"
+POLICY_ID="P123"
 # Contract definition ID matching DataAssembly.CONTRACT_DEFINITION_ID
-readonly CONTRACT_DEF_ID="CD123"
+CONTRACT_DEF_ID="CD123"
 
-# Asset IDs from DataAssembly.ASSET_IDS
-readonly ASSET_IDS=(
-  ACN0101 ACN0102 ACN0103 ACN0104
-  ACN0201 ACN0202 ACN0203 ACN0204 ACN0205 ACN0206 ACN0207
-  ACN0301 ACN0302 ACN0303 ACN0304
-  CAT0101 CAT0102
-)
+# Asset IDs from DataAssembly.ASSET_IDS (space-separated list)
+ASSET_IDS="ACN0101 ACN0102 ACN0103 ACN0104 ACN0201 ACN0202 ACN0203 ACN0204 ACN0205 ACN0206 ACN0207 ACN0301 ACN0302 ACN0303 ACN0304 CAT0101 CAT0102"
 
 # Provider-side agreement IDs (connector is provider, TCK is consumer)
-readonly PROVIDER_AGREEMENT_IDS=(
-  ATP0101 ATP0102 ATP0103 ATP0104 ATP0105
-  ATP0201 ATP0202 ATP0203 ATP0204 ATP0205
-  ATP0301 ATP0302 ATP0303 ATP0304 ATP0305 ATP0306
-)
+PROVIDER_AGREEMENT_IDS="ATP0101 ATP0102 ATP0103 ATP0104 ATP0105 ATP0201 ATP0202 ATP0203 ATP0204 ATP0205 ATP0301 ATP0302 ATP0303 ATP0304 ATP0305 ATP0306"
 
 # Consumer-side agreement IDs (connector is consumer, TCK is provider)
-readonly CONSUMER_AGREEMENT_IDS=(
-  ATPC0101 ATPC0102 ATPC0103 ATPC0104 ATPC0105
-  ATPC0201 ATPC0202 ATPC0203 ATPC0204 ATPC0205
-  ATPC0301 ATPC0302 ATPC0303 ATPC0304 ATPC0305 ATPC0306
-)
+CONSUMER_AGREEMENT_IDS="ATPC0101 ATPC0102 ATPC0103 ATPC0104 ATPC0105 ATPC0201 ATPC0202 ATPC0203 ATPC0204 ATPC0205 ATPC0301 ATPC0302 ATPC0303 ATPC0304 ATPC0305 ATPC0306"
 
 # Signing timestamp for agreements
-readonly SIGNING_DATE=$(date +%s)
+SIGNING_DATE=$(date +%s)
 
 # ---------------------------------------------------------------------------
 # ODRL Policy (expanded JSON-LD format)
@@ -86,19 +75,16 @@ readonly SIGNING_DATE=$(date +%s)
 # This policy matches the permissive "use" policy created by DataAssembly.
 # The uid field maps to the policy ID used by the TMFEdcMapper.
 # ---------------------------------------------------------------------------
-read -r -d '' ODRL_POLICY <<'POLICY_EOF' || true
-{
-  "@type": "http://www.w3.org/ns/odrl/2/Set",
-  "http://www.w3.org/ns/odrl/2/uid": "P123",
-  "http://www.w3.org/ns/odrl/2/permission": [
-    {
-      "http://www.w3.org/ns/odrl/2/action": [
-        {"@id": "http://www.w3.org/ns/odrl/2/use"}
-      ]
-    }
-  ]
+ODRL_POLICY='{"@type":"http://www.w3.org/ns/odrl/2/Set","http://www.w3.org/ns/odrl/2/uid":"P123","http://www.w3.org/ns/odrl/2/permission":[{"http://www.w3.org/ns/odrl/2/action":[{"@id":"http://www.w3.org/ns/odrl/2/use"}]}]}'
+
+# ---------------------------------------------------------------------------
+# Helper: count words in a space-separated list
+# ---------------------------------------------------------------------------
+word_count() {
+  # shellcheck disable=SC2086
+  set -- $1
+  echo $#
 }
-POLICY_EOF
 
 # ---------------------------------------------------------------------------
 # Functions
@@ -116,7 +102,7 @@ die() {
 ## Wait for TMForum API to become available.
 wait_for_tmforum() {
   log "Waiting for TMForum API at ${TMF_BASE_URL}..."
-  local attempt=0
+  attempt=0
   while [ "$attempt" -lt "$MAX_RETRIES" ]; do
     if curl -sf "${CATALOG_API}/productSpecification?limit=1" >/dev/null 2>&1; then
       log "TMForum API is ready."
@@ -130,8 +116,7 @@ wait_for_tmforum() {
 
 ## Create a ProductSpecification (maps to an EDC Asset).
 create_product_spec() {
-  local asset_id="$1"
-  local response
+  asset_id="$1"
   response=$(curl -sf -X POST "${CATALOG_API}/productSpecification" \
     -H "Content-Type: application/json" \
     -d "{
@@ -164,8 +149,7 @@ create_product_spec() {
 
 ## Create a ProductOffering (maps to an EDC ContractDefinition).
 create_product_offering() {
-  local def_id="$1"
-  local response
+  def_id="$1"
   response=$(curl -sf -X POST "${CATALOG_API}/productOffering" \
     -H "Content-Type: application/json" \
     -d "{
@@ -187,10 +171,9 @@ create_product_offering() {
 
 ## Create a TMForum Agreement (maps to an EDC ContractAgreement).
 create_agreement() {
-  local agreement_id="$1"
-  local provider_id="$2"
-  local consumer_id="$3"
-  local response
+  agreement_id="$1"
+  provider_id="$2"
+  consumer_id="$3"
   response=$(curl -sf -X POST "${AGREEMENT_API}/agreement" \
     -H "Content-Type: application/json" \
     -d "{
@@ -227,14 +210,15 @@ log "Participant ID: ${PARTICIPANT_ID}"
 wait_for_tmforum
 
 # Create ProductSpecifications (assets)
-log "Creating ${#ASSET_IDS[@]} ProductSpecifications (assets)..."
+ASSET_COUNT=$(word_count "$ASSET_IDS")
+log "Creating ${ASSET_COUNT} ProductSpecifications (assets)..."
 success=0
-for asset_id in "${ASSET_IDS[@]}"; do
+for asset_id in $ASSET_IDS; do
   if create_product_spec "$asset_id"; then
     success=$((success + 1))
   fi
 done
-log "Created ${success}/${#ASSET_IDS[@]} ProductSpecifications."
+log "Created ${success}/${ASSET_COUNT} ProductSpecifications."
 
 # Create ProductOffering (contract definition)
 log "Creating ProductOffering (contract definition: ${CONTRACT_DEF_ID})..."
@@ -245,23 +229,25 @@ else
 fi
 
 # Create provider-side agreements (connector = provider, TCK = consumer)
-log "Creating ${#PROVIDER_AGREEMENT_IDS[@]} provider-side Agreements..."
+PROVIDER_COUNT=$(word_count "$PROVIDER_AGREEMENT_IDS")
+log "Creating ${PROVIDER_COUNT} provider-side Agreements..."
 success=0
-for agreement_id in "${PROVIDER_AGREEMENT_IDS[@]}"; do
+for agreement_id in $PROVIDER_AGREEMENT_IDS; do
   if create_agreement "$agreement_id" "$PARTICIPANT_ID" "$TCK_PARTICIPANT"; then
     success=$((success + 1))
   fi
 done
-log "Created ${success}/${#PROVIDER_AGREEMENT_IDS[@]} provider-side Agreements."
+log "Created ${success}/${PROVIDER_COUNT} provider-side Agreements."
 
 # Create consumer-side agreements (connector = consumer, TCK = provider)
-log "Creating ${#CONSUMER_AGREEMENT_IDS[@]} consumer-side Agreements..."
+CONSUMER_COUNT=$(word_count "$CONSUMER_AGREEMENT_IDS")
+log "Creating ${CONSUMER_COUNT} consumer-side Agreements..."
 success=0
-for agreement_id in "${CONSUMER_AGREEMENT_IDS[@]}"; do
+for agreement_id in $CONSUMER_AGREEMENT_IDS; do
   if create_agreement "$agreement_id" "$TCK_PARTICIPANT" "$PARTICIPANT_ID"; then
     success=$((success + 1))
   fi
 done
-log "Created ${success}/${#CONSUMER_AGREEMENT_IDS[@]} consumer-side Agreements."
+log "Created ${success}/${CONSUMER_COUNT} consumer-side Agreements."
 
 log "=== TMForum Test Data Initialization Complete ==="
