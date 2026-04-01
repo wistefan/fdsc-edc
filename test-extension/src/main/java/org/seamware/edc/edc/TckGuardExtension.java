@@ -38,9 +38,13 @@ package org.seamware.edc.edc;
 
 import static org.seamware.edc.edc.DataAssembly.*;
 
+import java.util.logging.Logger;
+import org.eclipse.edc.connector.controlplane.asset.spi.index.AssetIndex;
 import org.eclipse.edc.connector.controlplane.contract.spi.event.contractnegotiation.ContractNegotiationEvent;
 import org.eclipse.edc.connector.controlplane.contract.spi.negotiation.ContractNegotiationPendingGuard;
 import org.eclipse.edc.connector.controlplane.contract.spi.negotiation.store.ContractNegotiationStore;
+import org.eclipse.edc.connector.controlplane.contract.spi.offer.store.ContractDefinitionStore;
+import org.eclipse.edc.connector.controlplane.policy.spi.store.PolicyDefinitionStore;
 import org.eclipse.edc.connector.controlplane.transfer.spi.TransferProcessPendingGuard;
 import org.eclipse.edc.connector.controlplane.transfer.spi.event.TransferProcessEvent;
 import org.eclipse.edc.connector.controlplane.transfer.spi.store.TransferProcessStore;
@@ -51,8 +55,9 @@ import org.eclipse.edc.spi.system.ServiceExtensionContext;
 import org.eclipse.edc.transaction.spi.TransactionContext;
 import org.seamware.edc.TestConfig;
 
-/** Loads the transition guard. */
+/** Loads the transition guard and initializes TCK test data in the EDC stores. */
 public class TckGuardExtension implements ServiceExtension {
+  private static final Logger LOG = Logger.getLogger(TckGuardExtension.class.getName());
   private static final String NAME = "DSP TCK Guard";
 
   private volatile ContractNegotiationGuard negotiationGuard;
@@ -67,6 +72,12 @@ public class TckGuardExtension implements ServiceExtension {
 
   @Inject private EventRouter router;
 
+  @Inject private AssetIndex assetIndex;
+
+  @Inject private ContractDefinitionStore contractDefinitionStore;
+
+  @Inject private PolicyDefinitionStore policyDefinitionStore;
+
   @Override
   public String name() {
     return NAME;
@@ -76,9 +87,38 @@ public class TckGuardExtension implements ServiceExtension {
   public void initialize(ServiceExtensionContext context) {
     TestConfig testConfig = TestConfig.fromConfig(context.getConfig());
     if (testConfig.isEnabled()) {
+      initializeTestData(context.getParticipantId());
       context.registerService(TransferProcessPendingGuard.class, transferProcessPendingGuard());
       context.registerService(ContractNegotiationPendingGuard.class, negotiationGuard());
     }
+  }
+
+  /**
+   * Populates the EDC in-memory stores with test assets, policies, contract definitions, and
+   * pre-signed agreements required by the DSP TCK test scenarios.
+   *
+   * @param participantId the connector's participant ID from the runtime configuration
+   */
+  private void initializeTestData(String participantId) {
+    LOG.info("Initializing TCK test data for participant: " + participantId);
+
+    // Create the permissive policy used by all test contract definitions
+    policyDefinitionStore.create(DataAssembly.createPolicyDefinition());
+    LOG.info("Created TCK policy definition: " + DataAssembly.POLICY_ID);
+
+    // Create the contract definition that matches all test assets
+    contractDefinitionStore.save(DataAssembly.createContractDefinition());
+    LOG.info("Created TCK contract definition: " + DataAssembly.CONTRACT_DEFINITION_ID);
+
+    // Create all test assets for catalog and negotiation scenarios
+    var assets = DataAssembly.createAllAssets();
+    assets.forEach(assetIndex::create);
+    LOG.info("Created " + assets.size() + " TCK test assets");
+
+    // Create finalized contract negotiations with agreements for transfer process tests
+    var agreements = DataAssembly.createAllAgreements(participantId);
+    agreements.forEach(store::save);
+    LOG.info("Created " + agreements.size() + " TCK contract agreements");
   }
 
   public ContractNegotiationPendingGuard negotiationGuard() {

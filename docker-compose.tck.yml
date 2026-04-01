@@ -17,6 +17,25 @@
 
 services:
   # -------------------------------------------------------------------------
+  # HashiCorp Vault (dev mode) — required by the vault-hashicorp EDC extension
+  # -------------------------------------------------------------------------
+  vault:
+    image: hashicorp/vault:1.17
+    environment:
+      VAULT_DEV_ROOT_TOKEN_ID: root-token
+      VAULT_DEV_LISTEN_ADDRESS: "0.0.0.0:8200"
+    cap_add:
+      - IPC_LOCK
+    healthcheck:
+      test: ["CMD", "vault", "status"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    networks:
+      - tck-net
+
+  # -------------------------------------------------------------------------
   # EDC Controlplane (OID4VC variant) configured for TCK mode
   # -------------------------------------------------------------------------
   edc:
@@ -41,6 +60,9 @@ services:
       timeout: 5s
       retries: 30
       start_period: 30s
+    depends_on:
+      vault:
+        condition: service_healthy
     networks:
       - tck-net
 

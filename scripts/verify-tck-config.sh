@@ -76,9 +76,10 @@ echo "=== Checking asset ID consistency ==="
 # Extract ASSET_IDS from DataAssembly.java (e.g., "ACN0101", "CAT0101")
 ASSET_IDS=$(grep -oP '"[A-Z]+\d+"' "${DATA_ASSEMBLY}" | grep -P '"(ACN|CAT)\d+"' | tr -d '"' | sort -u)
 
-# Extract asset IDs referenced in tck.properties (DATASETID and OFFERID values)
-# Only from CN_ and CAT_ lines (not CN_C_ which use ACNC IDs)
-TCK_ASSET_IDS=$(grep -P '^(CN_\d|CAT_\d).*=' "${TCK_PROPS}" | grep -oP '=(ACN|CAT)\d+' | tr -d '=' | sort -u)
+# Extract asset IDs referenced in tck.properties (DATASETID values and the
+# asset-id portion of OFFERID values, which use the format CD123:<assetId>).
+# Only from CN_ and CAT_ lines (not CN_C_ which use ACNC IDs).
+TCK_ASSET_IDS=$(grep -P '^(CN_\d|CAT_\d).*=' "${TCK_PROPS}" | grep -oP '(ACN|CAT)\d+' | sort -u)
 
 for id in ${TCK_ASSET_IDS}; do
   if echo "${ASSET_IDS}" | grep -qx "${id}"; then
