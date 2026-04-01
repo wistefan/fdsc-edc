@@ -36,8 +36,8 @@ package org.seamware.edc.edc;
  * #L%
  */
 
-import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
 import org.eclipse.edc.connector.controlplane.transfer.spi.event.TransferProcessEvent;
 import org.eclipse.edc.connector.controlplane.transfer.spi.types.TransferProcess;
@@ -45,15 +45,19 @@ import org.eclipse.edc.spi.event.Event;
 import org.eclipse.edc.spi.event.EventEnvelope;
 import org.eclipse.edc.spi.event.EventSubscriber;
 import org.eclipse.edc.spi.persistence.StateEntityStore;
+import org.eclipse.edc.transaction.spi.TransactionContext;
 
 /** Fires triggers based on transfer events. */
 public class TransferProcessTriggerSubscriber
     implements EventSubscriber, TransferProcessTriggerRegistry {
-  private final List<Trigger<TransferProcess>> triggers = new ArrayList<>();
+  private final List<Trigger<TransferProcess>> triggers = new CopyOnWriteArrayList<>();
   private final StateEntityStore<TransferProcess> store;
+  private final TransactionContext transactionContext;
 
-  public TransferProcessTriggerSubscriber(StateEntityStore<TransferProcess> store) {
+  public TransferProcessTriggerSubscriber(
+      StateEntityStore<TransferProcess> store, TransactionContext transactionContext) {
     this.store = store;
+    this.transactionContext = transactionContext;
   }
 
   @Override
@@ -73,9 +77,13 @@ public class TransferProcessTriggerSubscriber
         .forEach(
             trigger -> {
               var event = (TransferProcessEvent) envelope.getPayload();
-              var negotiation = store.findByIdAndLease(event.getTransferProcessId()).getContent();
-              trigger.action().accept(negotiation);
-              store.save(negotiation);
+              transactionContext.execute(
+                  () -> {
+                    var transferProcess =
+                        store.findByIdAndLease(event.getTransferProcessId()).getContent();
+                    trigger.action().accept(transferProcess);
+                    store.save(transferProcess);
+                  });
             });
   }
 }

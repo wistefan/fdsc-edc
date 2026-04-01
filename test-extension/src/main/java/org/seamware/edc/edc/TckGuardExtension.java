@@ -55,9 +55,9 @@ import org.seamware.edc.TestConfig;
 public class TckGuardExtension implements ServiceExtension {
   private static final String NAME = "DSP TCK Guard";
 
-  private ContractNegotiationGuard negotiationGuard;
+  private volatile ContractNegotiationGuard negotiationGuard;
 
-  private TransferProcessGuard transferProcessGuard;
+  private volatile TransferProcessGuard transferProcessGuard;
 
   @Inject private ContractNegotiationStore store;
 
@@ -97,7 +97,7 @@ public class TckGuardExtension implements ServiceExtension {
   public TransferProcessPendingGuard transferProcessPendingGuard() {
     var recorder = createTransferProcessRecorder();
 
-    var tpRegistry = new TransferProcessTriggerSubscriber(transferProcessStore);
+    var tpRegistry = new TransferProcessTriggerSubscriber(transferProcessStore, transactionContext);
     createTransferProcessTriggers().forEach(tpRegistry::register);
     router.register(TransferProcessEvent.class, tpRegistry);
 

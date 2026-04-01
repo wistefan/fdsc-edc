@@ -382,14 +382,16 @@ public class DataAssembly {
             (process) -> process.transitionTerminating("error")));
   }
 
+  /**
+   * Creates a trigger that alternates between suspending and completing a transfer process. Uses
+   * atomic compare-and-set to ensure thread-safe state transitions.
+   */
   public static Consumer<TransferProcess> suspendResumeTrigger() {
     var count = new AtomicInteger(0);
     return (process) -> {
-      if (count.get() == 0) {
-        count.incrementAndGet();
+      if (count.compareAndSet(0, 1)) {
         process.transitionSuspending("suspending");
-      } else if (count.get() == 1) {
-        count.set(0);
+      } else if (count.compareAndSet(1, 0)) {
         process.transitionCompleting();
       }
     };
