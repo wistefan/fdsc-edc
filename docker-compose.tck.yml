@@ -71,7 +71,7 @@ services:
   # Uses Scorpio NGSI-LD context broker for persistent storage.
   # -------------------------------------------------------------------------
   tmforum:
-    image: quay.io/fiware/tmforum-all-in-one:${TMF_VERSION:-0.25.0}
+    image: quay.io/fiware/tmforum-all-in-one:${TMF_VERSION:-1.5.4}
     environment:
       MICRONAUT_HTTP_SERVICES_NGSI_URL: http://scorpio:9090
       MICRONAUT_HTTP_SERVICES_NGSI_PATH: ngsi-ld/v1
