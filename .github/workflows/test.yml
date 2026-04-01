@@ -14,18 +14,26 @@ jobs:
 
     steps:
 
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
 
-      - uses: actions/setup-java@v1
+      - uses: actions/setup-java@v4
         with:
+          distribution: temurin
           java-version: '21'
-          java-package: jdk
+
+      - name: Cache Maven dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository
+          key: ${{ runner.os }}-maven-${{ hashFiles('**/pom.xml') }}
+          restore-keys: |
+            ${{ runner.os }}-maven-
 
       - name: Check code style and license
         run: mvn clean spotless:check
 
       - name: Run tests
-        run: mvn clean test
+        run: mvn test
 
   tck-conformance:
     name: DSP TCK Conformance Tests
@@ -50,13 +58,37 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-maven-
 
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Cache Docker layers
+        uses: actions/cache@v4
+        with:
+          path: /tmp/.buildx-cache
+          key: ${{ runner.os }}-docker-${{ hashFiles('docker/Dockerfile', '**/pom.xml') }}
+          restore-keys: |
+            ${{ runner.os }}-docker-
+
       - name: Build controlplane shaded JAR
-        run: mvn clean package -pl controlplane-oid4vc -am -DskipTests -q
+        run: mvn package -pl controlplane-oid4vc -am -DskipTests -q
+
+      - name: Build EDC Docker image with cache
+        run: |
+          docker buildx build \
+            --file docker/Dockerfile \
+            --build-arg JAR=controlplane-oid4vc/target/controlplane-oid4vc-0.0.1-SNAPSHOT.jar \
+            --tag fdsc-edc-controlplane-oid4vc:latest \
+            --cache-from type=local,src=/tmp/.buildx-cache \
+            --cache-to type=local,dest=/tmp/.buildx-cache-new,mode=max \
+            --load \
+            .
+          # Rotate cache to avoid unbounded growth
+          rm -rf /tmp/.buildx-cache
+          mv /tmp/.buildx-cache-new /tmp/.buildx-cache
 
       - name: Start EDC and run TCK tests
         run: |
           docker compose -f docker-compose.tck.yml up \
-            --build \
             --abort-on-container-exit \
             --exit-code-from tck
         env:

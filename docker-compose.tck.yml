@@ -20,6 +20,7 @@ services:
   # EDC Controlplane (OID4VC variant) configured for TCK mode
   # -------------------------------------------------------------------------
   edc:
+    image: fdsc-edc-controlplane-oid4vc:${EDC_IMAGE_TAG:-latest}
     build:
       context: .
       dockerfile: docker/Dockerfile
