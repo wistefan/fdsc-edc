@@ -5,6 +5,9 @@
 # Usage:
 #   docker compose -f docker-compose.tck.yml up --build --abort-on-container-exit --exit-code-from tck
 #
+# To override the TCK image version:
+#   DSP_TCK_VERSION=0.9.0 docker compose -f docker-compose.tck.yml up --build --abort-on-container-exit --exit-code-from tck
+#
 # Prerequisites:
 #   - Build the controlplane shaded JAR first:
 #     mvn clean package -pl controlplane-oid4vc -am -DskipTests
@@ -44,7 +47,7 @@ services:
   # Eclipse DSP TCK Runner
   # -------------------------------------------------------------------------
   tck:
-    image: eclipsedataspacetck/dsp-tck-runtime:latest
+    image: eclipsedataspacetck/dsp-tck-runtime:${DSP_TCK_VERSION:-1.0.0-RC6}
     volumes:
       - ./config/tck/tck.properties:/etc/tck/config.properties:ro
     depends_on:
