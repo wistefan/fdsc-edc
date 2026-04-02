@@ -42,6 +42,8 @@ import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 import org.eclipse.edc.spi.entity.PendingGuard;
 import org.eclipse.edc.spi.entity.StatefulEntity;
 import org.eclipse.edc.spi.persistence.StateEntityStore;
@@ -54,6 +56,14 @@ import org.jetbrains.annotations.NotNull;
  * not performed in the context of a command handler.
  */
 public class DelayedActionGuard<T extends StatefulEntity<T>> implements PendingGuard<T> {
+  private static final Logger LOG = Logger.getLogger(DelayedActionGuard.class.getName());
+
+  /** Delay in milliseconds before a queued guard action is executed. */
+  private static final long GUARD_DELAY_MS = 500;
+
+  /** Poll timeout in milliseconds for the delay queue. */
+  private static final long POLL_TIMEOUT_MS = 10;
+
   private final Predicate<T> filter;
   private final Consumer<T> action;
   private final DelayQueue<GuardDelay> queue;
@@ -68,27 +78,33 @@ public class DelayedActionGuard<T extends StatefulEntity<T>> implements PendingG
     queue = new DelayQueue<>();
   }
 
+  /** Starts the guard's background processing loop. */
   public void start() {
     active.set(true);
     executor.submit(
         () -> {
           while (active.get()) {
             try {
-              var entry = queue.poll(10, MILLISECONDS);
+              var entry = queue.poll(POLL_TIMEOUT_MS, MILLISECONDS);
               if (entry != null) {
-                action.accept(entry.entity);
-                entry.entity.setPending(false);
-                store.save(entry.entity);
+                try {
+                  action.accept(entry.entity);
+                } catch (Exception e) {
+                  LOG.log(Level.WARNING, "Guard action failed", e);
+                } finally {
+                  entry.entity.setPending(false);
+                  store.save(entry.entity);
+                }
               }
             } catch (InterruptedException e) {
-              e.printStackTrace();
-              Thread.interrupted();
+              Thread.currentThread().interrupt();
               break;
             }
           }
         });
   }
 
+  /** Stops the guard's background processing loop. */
   public void stop() {
     active.set(false);
   }
@@ -102,9 +118,10 @@ public class DelayedActionGuard<T extends StatefulEntity<T>> implements PendingG
     return false;
   }
 
+  /** A delayed entry that holds an entity for deferred guard processing. */
   protected class GuardDelay implements Delayed {
     private final long start;
-    T entity;
+    final T entity;
 
     GuardDelay(T entity) {
       this.entity = entity;
@@ -121,7 +138,7 @@ public class DelayedActionGuard<T extends StatefulEntity<T>> implements PendingG
 
     @Override
     public long getDelay(@NotNull TimeUnit timeUnit) {
-      return timeUnit.convert(500 - (System.currentTimeMillis() - start), MILLISECONDS);
+      return timeUnit.convert(GUARD_DELAY_MS - (System.currentTimeMillis() - start), MILLISECONDS);
     }
   }
 }

@@ -36,8 +36,8 @@ package org.seamware.edc.edc;
  * #L%
  */
 
-import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
 import org.eclipse.edc.connector.controlplane.contract.spi.event.contractnegotiation.ContractNegotiationEvent;
 import org.eclipse.edc.connector.controlplane.contract.spi.types.negotiation.ContractNegotiation;
@@ -50,7 +50,7 @@ import org.eclipse.edc.transaction.spi.TransactionContext;
 /** Fires triggers based on negotiation events. */
 public class ContractNegotiationTriggerSubscriber
     implements EventSubscriber, ContractNegotiationTriggerRegistry {
-  private final List<Trigger<ContractNegotiation>> triggers = new ArrayList<>();
+  private final List<Trigger<ContractNegotiation>> triggers = new CopyOnWriteArrayList<>();
   private final StateEntityStore<ContractNegotiation> store;
   private final TransactionContext transactionContext;
 

@@ -43,6 +43,7 @@ import org.eclipse.edc.runtime.metamodel.annotation.Provides;
 import org.eclipse.edc.spi.iam.AudienceResolver;
 import org.eclipse.edc.spi.iam.IdentityService;
 import org.eclipse.edc.spi.monitor.Monitor;
+import org.eclipse.edc.spi.security.Vault;
 import org.eclipse.edc.spi.system.ServiceExtension;
 import org.eclipse.edc.spi.system.ServiceExtensionContext;
 import org.seamware.edc.TestConfig;
@@ -50,7 +51,8 @@ import org.seamware.edc.TestConfig;
 @Provides({
   IdentityService.class,
   AudienceResolver.class,
-  DefaultParticipantIdExtractionFunction.class
+  DefaultParticipantIdExtractionFunction.class,
+  Vault.class
 })
 public class TestIdentityExtension implements ServiceExtension {
 
@@ -77,6 +79,8 @@ public class TestIdentityExtension implements ServiceExtension {
     context.registerService(AudienceResolver.class, audienceResolver());
     context.registerService(
         DefaultParticipantIdExtractionFunction.class, defaultParticipantIdExtractionFunction());
+    context.registerService(Vault.class, new InMemoryVault());
+    monitor.info("Registered in-memory Vault for test mode (no external vault required).");
   }
 
   private IdentityService identityService(ServiceExtensionContext context) {
